@@ -20,3 +20,7 @@ logs/*.log.*
 # Debug logs
 logs/debug.log
 logs/debug.log.*
+
+# ide
+.idea/
+.vscode/
