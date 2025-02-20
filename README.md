@@ -79,3 +79,8 @@ curl -X POST "http://localhost:3050/chat/gemini" \
 ```
 
 
+## Known issues
+
+the frontend's payload require a 'model' key. 
+but the backend does not require it.
+todo resolve the inconsistency, eg backend should ignore the 'model' key if it is present in the payload, set to a default model name for a given provider.
