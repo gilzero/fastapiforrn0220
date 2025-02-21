@@ -34,7 +34,7 @@ class ConversationMessage(BaseModel):
 class ChatRequest(BaseModel):
     messages: List[ConversationMessage] = Field(
         ...,  # Required field
-        min_items=1,
+        min_length=1,
         description="List of conversation messages. Cannot be empty."
     )
 

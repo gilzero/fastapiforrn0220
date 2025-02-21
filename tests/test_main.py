@@ -449,10 +449,9 @@ def test_chat_endpoint_validation_errors(test_client, provider):
 @pytest.mark.parametrize("provider", TEST_PROVIDERS.keys())
 def test_chat_endpoint_malformed_json(test_client, provider):
     """Test handling of malformed JSON in request"""
-    malformed_json = "{'messages': [not valid json]}"
     response = test_client.post(
         f"/chat/{provider}",
-        data=malformed_json,
+        content=json.dumps({"malformed": "json"}),
         headers={"Content-Type": "application/json"}
     )
     assert response.status_code == 422

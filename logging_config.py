@@ -4,78 +4,92 @@ import logging.handlers
 from pathlib import Path
 import sys
 import json
-from datetime import datetime, UTC
-
+from datetime import datetime, timezone
+from typing import Optional, Dict, List, Tuple, Any
 
 class CustomFormatter(logging.Formatter):
-    """Custom formatter that includes more context for debug logs"""
-    
-    def format(self, record):
-        # Add timezone-aware UTC timestamp
-        record.timestamp = datetime.now(UTC).isoformat()
-        
-        # For debug logs, add extra context if available
+    """Custom formatter that includes timezone-aware UTC timestamp and formats debug context."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        """Format the log record with UTC timestamp and optional context."""
+        record.timestamp = datetime.now(timezone.utc).isoformat()
         if record.levelno == logging.DEBUG and hasattr(record, 'extra_context'):
             try:
-                # Format extra context as JSON
-                context = json.dumps(record.extra_context, indent=2)
+                context = json.dumps(record.extra_context, indent=2, ensure_ascii=False)
                 record.msg = f"{record.msg}\nContext: {context}"
+            except (TypeError, ValueError) as e:
+                record.msg = f"{record.msg}\nContext Error: {str(e)}"
             except Exception:
-                pass
-        
+                record.msg = (f"{record.msg}\nContext: (Could not serialize to"
+                               f"JSON: Unknown Exception)")
         return super().format(record)
 
+def create_file_handler(
+    log_path: Path,
+    level: int,
+    formatter: logging.Formatter,
+    max_bytes: Optional[int] = None,
+    backup_count: Optional[int] = None
+) -> logging.Handler:
+    """Create a file handler with optional rotation settings."""
+    if max_bytes and backup_count:
+        handler = logging.handlers.RotatingFileHandler(
+            log_path, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8"
+        )
+    else:
+        handler = logging.FileHandler(log_path, encoding="utf-8")
+    handler.setFormatter(formatter)
+    handler.setLevel(level)
+    return handler
 
-def setup_logging():
-    logger = logging.getLogger()
-    logger.setLevel(logging.DEBUG)  # Set root logger to DEBUG
-    
-    formatter = CustomFormatter(
-        '%(timestamp)s - %(name)s - %(levelname)s - %(message)s'
-    )
+def setup_logging(
+    log_dir: str = "logs",
+    logger_name: Optional[str] = None,
+    max_bytes: int = 10485760,
+    backup_count: int = 5,
+    log_format: str = '%(timestamp)s - %(name)s - %(levelname)s - %(message)s',
+    clear_handlers: bool = True
+) -> logging.Logger:
+    """Set up logging configuration with file and console handlers."""
+    logger = logging.getLogger(logger_name) if logger_name else logging.getLogger()
+    logger.setLevel(logging.DEBUG)
 
-    # Create logs directory
-    log_dir = Path("logs")
-    log_dir.mkdir(exist_ok=True)
+    if clear_handlers:
+        for handler in logger.handlers[:]:
+            handler.close()  # Close handlers to free resources
+            logger.removeHandler(handler)
 
-    # Console handler - INFO and above
+    formatter = CustomFormatter(log_format)
+    log_dir_path = Path(log_dir)
+    try:
+        log_dir_path.mkdir(exist_ok=True)
+    except OSError as e:
+        raise OSError(f"Failed to create log directory {log_dir}: {e}")
+
+    handlers: List[Tuple[Path, int, Optional[int], Optional[int]]] = [
+        (log_dir_path / "app.log", logging.INFO, max_bytes, backup_count),
+        (log_dir_path / "error.log", logging.ERROR, max_bytes, backup_count),
+        (log_dir_path / "debug.log", logging.DEBUG, max_bytes, backup_count)
+    ]
+
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
     console_handler.setLevel(logging.INFO)
     logger.addHandler(console_handler)
 
-    # File handler for general logs - INFO and above
-    file_handler = logging.handlers.RotatingFileHandler(
-        "logs/app.log", maxBytes=10485760, backupCount=5, encoding="utf-8"
-    )
-    file_handler.setFormatter(formatter)
-    file_handler.setLevel(logging.INFO)
-    logger.addHandler(file_handler)
-
-    # File handler for error logs - ERROR and above
-    error_file_handler = logging.handlers.RotatingFileHandler(
-        "logs/error.log", maxBytes=10485760, backupCount=5, encoding="utf-8"
-    )
-    error_file_handler.setFormatter(formatter)
-    error_file_handler.setLevel(logging.ERROR)
-    logger.addHandler(error_file_handler)
-
-    # File handler for debug logs - DEBUG and above
-    debug_file_handler = logging.handlers.RotatingFileHandler(
-        "logs/debug.log", maxBytes=10485760, backupCount=5, encoding="utf-8"
-    )
-    debug_file_handler.setFormatter(formatter)
-    debug_file_handler.setLevel(logging.DEBUG)
-    logger.addHandler(debug_file_handler)
+    for log_path, level, max_size, backups in handlers:
+        try:
+            handler = create_file_handler(log_path, level, formatter, max_size, backups)
+            logger.addHandler(handler)
+        except Exception as e:
+            logger.error(f"Failed to create handler for {log_path}: {e}")
 
     return logger
 
-
-# Helper function to add context to debug logs
-def debug_with_context(logger, message, **context):
-    """Log debug message with additional context"""
+def debug_with_context(logger: logging.Logger, message: str, **context: Any) -> None:
+    """Log a debug message with additional context."""
     extra = {'extra_context': context}
     logger.debug(message, extra=extra)
 
-
+# initialize the root logger.  Individual modules should get their own loggers.
 logger = setup_logging()
