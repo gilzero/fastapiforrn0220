@@ -1,43 +1,197 @@
-# `test_aiproviders.py` Documentation
+# Test Documentation for AI Providers
 
-(filepath: tests/test_aiproviders.py)
+## Overview
 
-This file contains unit and integration tests for the `aiproviders.py` module, which handles interactions with various AI providers (OpenAI GPT, Anthropic Claude, and Google Gemini).
+This documentation covers the test suite for `aiproviders.py`, which handles interactions with multiple AI providers (GPT, Claude, and Gemini).
 
-## Test Data
+## Test Environment Setup
 
--   **`TEST_MESSAGE`**: A sample `ConversationMessage` with the role `USER` and content "Test message".
--   **`TEST_SYSTEM_MESSAGE`**: A sample `ConversationMessage` with the role `SYSTEM` and content "Test system prompt".
--   **`TEST_REQUEST`**: A sample `ChatRequest` containing both `TEST_SYSTEM_MESSAGE` and `TEST_MESSAGE`.
+### Required Environment Variables
+```bash
+OPENAI_API_KEY=test_key
+ANTHROPIC_API_KEY=test_key
+GEMINI_API_KEY=test_key
+OPENAI_MODEL_DEFAULT=gpt-4o
+ANTHROPIC_MODEL_DEFAULT=claude-3-5-sonnet-latest
+GEMINI_MODEL_DEFAULT=gemini-2.0-flash
+```
 
-## Helper Function Tests
+### Test Constants
+```python
+TEST_MESSAGE = ConversationMessage(
+    role=MessageRole.USER,
+    content="Test message"
+)
 
-These tests verify the behavior of utility functions within `aiproviders.py`.
+TEST_SYSTEM_MESSAGE = ConversationMessage(
+    role=MessageRole.SYSTEM,
+    content="Test system prompt"
+)
 
--   **`test_get_system_prompt_with_system_message()`**:  Asserts that `get_system_prompt` correctly returns the content of a provided system message.
--   **`test_get_system_prompt_without_system_message()`**: Asserts that `get_system_prompt` returns a generic system prompt when no system message is present in the input list.
--   **`test_get_system_prompt_empty_messages()`**: Asserts that `get_system_prompt` returns the `GENERIC_SYSTEM_PROMPT` when given an empty list of messages.
--   **`test_get_system_prompt_empty_content()`**: Asserts that `get_system_prompt` returns the `GENERIC_SYSTEM_PROMPT` when the system message has only minimal content (e.g. only ".").
--   **`test_get_system_prompt_whitespace_content()`**: Asserts that get_system_prompt` returns the `GENERIC_SYSTEM_PROMPT` when the system message content consist of only whitespaces and a minimal valid character (e.g. " . \n  \t  . ").
--   **`test_get_provider_model_default()`**: Asserts that `get_provider_model` returns the correct default model for a given provider ("gpt").
--   **`test_get_provider_model_fallback()`**: Asserts that `get_provider_model` returns the correct fallback model for a given provider ("gpt") when `use_fallback=True`.
--   **`test_get_provider_model_invalid()`**: Asserts that `get_provider_model` raises an exception when an invalid provider name is given.
--  **`test_conversation_message_validation()`**: Validates the `ConversationMessage` model's input validation, ensuring that an exception is raised if the message content is empty or consists only of whitespace.
+TEST_REQUEST = ChatRequest(
+    messages=[TEST_SYSTEM_MESSAGE, TEST_MESSAGE]
+)
+```
 
-## Stream Response Tests
+## Test Categories
 
-These tests use `pytest.mark.asyncio` to verify the asynchronous `stream_response` function. They utilize `unittest.mock`'s `AsyncMock` and `MagicMock` to simulate API responses.
+### 1. System Prompt Tests
+```python
+@pytest.mark.parametrize("messages,expected", [
+    ([TEST_SYSTEM_MESSAGE], "Test system prompt"),
+    ([], GENERIC_SYSTEM_PROMPT),
+    ([ConversationMessage(role="system", content=".")], GENERIC_SYSTEM_PROMPT),
+    ([ConversationMessage(role="system", content=" . \n \t")], GENERIC_SYSTEM_PROMPT)
+])
+def test_get_system_prompt(messages, expected):
+    assert get_system_prompt(messages) == expected
+```
 
--   **`test_stream_response_gpt()`**: Tests streaming from the GPT provider.  Mocks the OpenAI client and asserts that the stream returns chunks containing the expected "Test response" and ends with "[DONE]".
--   **`test_stream_response_claude()`**: Tests streaming from the Claude provider. Mocks the Anthropic client and asserts that the stream contains "Test" and ends with "[DONE]".
--   **`test_stream_response_gemini()`**: Tests streaming from the Gemini provider. Mocks the Google GenAI client and asserts that the stream returns chunks containing "Test response" and ends with "[DONE]".
--   **`test_stream_response_invalid_provider()`**: Asserts that `stream_response` raises an exception when an invalid provider is requested.
--   **`test_stream_response_empty_stream()`**: Tests the handling of an empty stream from the AI provider, ensuring that "[DONE]" is still returned.
--   **`test_stream_response_malformed_chunk()`**: Tests the handling of malformed chunks (missing expected attributes) from the AI provider. It verifies that the code doesn't crash and still returns "[DONE]". This is a crucial test for robustness.
+Tests:
+- Valid system message handling
+- Empty message list handling
+- Minimal content handling
+- Whitespace content handling
 
-## Health Check Tests
+### 2. Provider Model Selection Tests
+```python
+def test_get_provider_model():
+    # Default model test
+    assert get_provider_model("gpt") == OPENAI_MODEL_DEFAULT
+    
+    # Fallback model test
+    assert get_provider_model("gpt", use_fallback=True) == OPENAI_MODEL_FALLBACK
+    
+    # Invalid provider test
+    with pytest.raises(HTTPException):
+        get_provider_model("invalid")
+```
 
-These tests use `pytest.mark.asyncio` to verify the asynchronous `check_provider_health` function.
+### 3. Message Validation Tests
+```python
+@pytest.mark.parametrize("content,should_raise", [
+    ("", True),
+    (" \n\t", True),
+    ("Valid message", False),
+    ("." * (MAX_MESSAGE_LENGTH + 1), True)
+])
+def test_message_validation(content, should_raise):
+    if should_raise:
+        with pytest.raises(ValueError):
+            ConversationMessage(role="user", content=content)
+    else:
+        ConversationMessage(role="user", content=content)
+```
 
--   **`test_check_provider_health_success()`**: Tests a successful health check.  Mocks the OpenAI client to return a valid "OK" response and asserts that the function returns `True`, a success message, and a duration.
--   **`test_check_provider_health_failure()`**: Tests a failed health check.  Mocks the OpenAI client to raise an exception and asserts that the function returns `False`, an error message, and a duration.
+### 4. Stream Response Tests
+
+#### GPT Provider
+```python
+@pytest.mark.asyncio
+async def test_stream_response_gpt(mocker):
+    mock_client = mocker.patch("openai.AsyncClient")
+    mock_client.chat.completions.create.return_value = AsyncMock(
+        choices=[
+            MagicMock(delta=MagicMock(content="Test response"))
+        ]
+    )
+    
+    async for chunk in stream_response(TEST_REQUEST, "gpt"):
+        assert "Test response" in chunk or "[DONE]" in chunk
+```
+
+#### Claude Provider
+```python
+@pytest.mark.asyncio
+async def test_stream_response_claude(mocker):
+    mock_client = mocker.patch("anthropic.AsyncAnthropic")
+    mock_client.messages.stream.return_value = AsyncMock(
+        text_stream=["Test", "response"]
+    )
+    
+    async for chunk in stream_response(TEST_REQUEST, "claude"):
+        assert any(text in chunk for text in ["Test", "response", "[DONE]"])
+```
+
+#### Gemini Provider
+```python
+@pytest.mark.asyncio
+async def test_stream_response_gemini(mocker):
+    mock_client = mocker.patch("google.genai.Client")
+    mock_client.generate_content_stream.return_value = [
+        MagicMock(text="Test response")
+    ]
+    
+    async for chunk in stream_response(TEST_REQUEST, "gemini"):
+        assert "Test response" in chunk or "[DONE]" in chunk
+```
+
+### 5. Health Check Tests
+```python
+@pytest.mark.asyncio
+async def test_provider_health():
+    # Success case
+    success, message, duration = await check_provider_health("gpt")
+    assert success
+    assert "Model responding correctly" in message
+    assert isinstance(duration, float)
+
+    # Failure case
+    success, message, duration = await check_provider_health("invalid")
+    assert not success
+    assert isinstance(message, str)
+    assert isinstance(duration, float)
+```
+
+## Error Handling Tests
+
+### 1. API Error Tests
+```python
+@pytest.mark.asyncio
+async def test_api_errors(mocker):
+    # Test API key errors
+    mocker.patch("openai.AsyncClient", side_effect=ValueError("Invalid API key"))
+    with pytest.raises(HTTPException) as exc:
+        async for _ in stream_response(TEST_REQUEST, "gpt"):
+            pass
+    assert exc.value.status_code == 401
+```
+
+### 2. Validation Error Tests
+```python
+def test_validation_errors():
+    # Test message length
+    with pytest.raises(ValueError):
+        ConversationMessage(
+            role="user",
+            content="." * (MAX_MESSAGE_LENGTH + 1)
+        )
+
+    # Test message count
+    with pytest.raises(ValueError):
+        ChatRequest(messages=[TEST_MESSAGE] * (MAX_MESSAGES_IN_CONTEXT + 1))
+```
+
+## Test Coverage
+
+Key areas covered:
+- System prompt handling
+- Model selection logic
+- Message validation
+- Streaming responses
+- Health checks
+- Error handling
+- Provider-specific implementations
+
+## Running Tests
+
+```bash
+# Run all tests
+pytest tests/test_aiproviders.py -v
+
+# Run specific test category
+pytest tests/test_aiproviders.py -k "test_stream_response" -v
+
+# Run with coverage report
+pytest tests/test_aiproviders.py --cov=aiproviders -v
+```

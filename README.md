@@ -1,86 +1,191 @@
-## Known Issues
+# AI Chat API Server
 
-in some cases, the begingin of the response displayed is truncated.
+A FastAPI-based server providing a unified interface to multiple AI chat providers (GPT, Claude, and Gemini) with streaming responses.
 
+## Features
 
+- Multi-provider support (OpenAI/GPT, Anthropic/Claude, Google/Gemini)
+- Server-Sent Events (SSE) streaming responses
+- Automatic model fallback mechanism
+- Comprehensive logging system
+- Health monitoring endpoints
+- Input validation
+- Environment-based configuration
 
+## Project Structure
 
-## Test curls
-
-Test the Root Health Check Endpoint (/health)
-
-```bash
-curl -X GET "http://localhost:3050/health"
-  
+```
+.
+├── main.py                 # FastAPI application entry point
+├── aiproviders.py         # AI provider implementations
+├── models.py              # Data models and validation
+├── logging_config.py      # Logging configuration
+├── .env                   # Environment variables (not in repo)
+├── .env.example          # Environment template
+├── docs/                  # Documentation directory
+└── logs/                  # Log files directory
 ```
 
+## Setup
 
-Test Provider-Specific Health Check (/health/{provider})
+0. Clone the repository, and navigate to the directory
+
+1. Create and configure environment variables:
+   ```bash
+   cp .env.example .env
+   # Edit .env with your API keys and configurations
+   ```
+
+2. Install venv (recommended 3.11+)
+   ```bash
+   python3.11 -m venv venv
+   source venv/bin/activate
+   ```
+
+3. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. Run the server:
+   ```bash
+   python main.py
+   ```
+
+## Environment Configuration
+
+Key configurations in `.env`:
 
 ```bash
-curl -X GET "http://localhost:3050/health/gpt"
+# Server
+PORT=3050
 
-curl -X GET "http://localhost:3050/health/claude"
+# API Keys
+OPENAI_API_KEY=your_key
+ANTHROPIC_API_KEY=your_key
+GEMINI_API_KEY=your_key
 
-curl -X GET "http://localhost:3050/health/gemini"
-  
+# Models
+OPENAI_MODEL_DEFAULT=gpt-4o
+ANTHROPIC_MODEL_DEFAULT=claude-3-5-sonnet-latest
+GEMINI_MODEL_DEFAULT=gemini-2.0-flash
+
+# See .env.example for all configuration options
 ```
 
+## API Endpoints
 
-
-  
-  
-
-
-
-
-Test the Chat Endpoint (/chat/{provider}): 
-
+### Health Checks
 ```bash
+# Overall health
+GET /health
 
+# Provider-specific health
+GET /health/{provider}
+```
+
+### Chat
+```bash
+# Stream chat responses
+POST /chat/{provider}
+
+# Example request:
 curl -X POST "http://localhost:3050/chat/gpt" \
      -H "Content-Type: application/json" \
      -d '{
            "messages": [
-             {"role": "user", "content": "Hello, how are you?"}
-           ],
-           "model": "gpt-4o"
+             {"role": "user", "content": "Hello!"}
+           ]
          }'
-         
-         
-curl -X POST "http://localhost:3050/chat/claude" \
-     -H "Content-Type: application/json" \
-     -d '{
-           "messages": [
-             {"role": "user", "content": "Hello, how are you?"}
-           ],
-           "model": "claude-3-5-sonnet-latest"
-         }'
-         
-         
-curl -X POST "http://localhost:3050/chat/gemini" \
-     -H "Content-Type: application/json" \
-     -d '{
-           "messages": [
-             {"role": "user", "content": "Hello, how are you?"}
-           ],
-           "model": "gemini-2.0-flash"
-         }'
-
 ```
 
+See [API Documentation](docs/api_docs.md) for detailed specifications.
 
-## one liner
+## Model Selection Architecture
 
+- Backend-controlled model selection
+- Each provider has default and fallback models
+- Model information included in response streams
+- Automatic fallback on model failure
+- Configuration via environment variables
+
+## Logging System
+
+Three-tier logging system:
+- app.log: Information level
+- error.log: Error level
+- debug.log: Debug level with context
+
+See [Logging Documentation](docs/logs_doc.md) for details.
+
+## Development
+
+### Adding New Provider
+1. Add provider configuration to `.env.example`
+2. Update `SUPPORTED_PROVIDERS` in environment
+3. Add provider models to `PROVIDER_MODELS`
+4. Implement provider-specific streaming in `aiproviders.py`
+5. Update documentation
+
+### Running Tests
 ```bash
+# Run all tests
+pytest tests/ -v
 
-
-
+# Run with coverage
+pytest tests/ --cov=. -v
 ```
 
+## Documentation
 
-## Known issues
+- [API Documentation](docs/api_docs.md)
+- [Data Models](docs/data_models_docs.md)
+- [File Structure](docs/file_structure_docs.md)
+- [Logging System](docs/logs_doc.md)
+- [Integration Examples](docs/api_integration_examples.md)
+- [Test Documentation](docs/test_aiproviders_docs.md)
 
-the frontend's payload require a 'model' key. 
-but the backend does not require it.
-todo resolve the inconsistency, eg backend should ignore the 'model' key if it is present in the payload, set to a default model name for a given provider.
+## Known Issues
+
+1. Response Truncation:
+   - In some cases, the beginning of the response may be truncated
+   - Under investigation
+
+2. Frontend/Backend Model Field:
+   - Frontend may send 'model' field
+   - Backend intentionally ignores model selection
+   - Use model information from response streams
+
+## License
+
+MIT License
+
+## Contributing
+
+Feel free to contribute to the project by opening issues or submitting pull requests.
+
+## Author
+
+This project is developed by [Weiming](https://weiming.ai).
+
+## Roadmap
+
+- [ ] Add more providers
+- [ ] Add more tests
+- [ ] Add more documentation
+- [ ] Add more examples
+
+## Todo
+
+- [ ] todo 1 
+- [ ] todo 2 
+- [ ] todo 3 
+- [ ] todo 4 
+- [ ] todo 5 
+- [ ] todo 6 
+- [ ] todo 7 
+- [ ] todo 8 
+
+## Last Updated
+
+- 2025-02-21
