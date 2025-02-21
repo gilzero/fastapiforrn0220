@@ -27,4 +27,6 @@ logs/debug.log.*
 
 # pytest
 .pytest_cache/
+.coverage/
+.coverage
 

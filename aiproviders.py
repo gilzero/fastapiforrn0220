@@ -7,8 +7,8 @@ from datetime import datetime, UTC
 from dotenv import load_dotenv
 import os
 from fastapi import HTTPException
-from openai import OpenAI
-from anthropic import Anthropic
+from openai import AsyncOpenAI
+from anthropic import AsyncAnthropic
 from google import genai
 from google.genai import types
 from models import ChatRequest, ConversationMessage
@@ -63,8 +63,8 @@ for provider in SUPPORTED_PROVIDERS:
         raise ValueError(f"Environment Error: Provider '{provider}' in SUPPORTED_PROVIDERS not found in PROVIDER_MODELS")
 
 # Initialize clients
-client = OpenAI(api_key=OPENAI_API_KEY)
-anthropic_client = Anthropic(api_key=ANTHROPIC_API_KEY)
+client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+anthropic_client = AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
 genai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 
@@ -148,11 +148,8 @@ async def stream_response(request: ChatRequest, provider: str):
                             temperature=float(OPENAI_TEMPERATURE or 0.7),
                             max_tokens=int(OPENAI_MAX_TOKENS or 2000),
                         )
-                        for chunk in stream:
-                            if hasattr(chunk, 'choices') and chunk.choices and \
-                               hasattr(chunk.choices[0], 'delta') and \
-                               hasattr(chunk.choices[0].delta, 'content') and \
-                               chunk.choices[0].delta.content is not None:
+                        async for chunk in stream:
+                            if chunk.choices[0].delta.content is not None:
                                 chunks_sent += 1
                                 data = {
                                     "id": message_id,
@@ -172,54 +169,63 @@ async def stream_response(request: ChatRequest, provider: str):
                         )
                     except Exception as e:
                         logger.error(f"Error in GPT stream: {str(e)}", exc_info=True)
-                        return
+                        raise
 
                 elif provider == "claude":
                     messages = [
                         {"role": m.role, "content": m.content}
                         for m in request.messages if m.role != "system"
                     ]
-                    async with await anthropic_client.messages.stream(
+                    try:
+                        async with anthropic_client.messages.stream(
                             model=model,
                             messages=messages,
                             system=CLAUDE_SYSTEM_PROMPT,
                             max_tokens=int(ANTHROPIC_MAX_TOKENS or 2000),
                             temperature=float(ANTHROPIC_TEMPERATURE or 0.7),
-                    ) as stream:
-                        for text in stream.text_stream:
-                            data = {
-                                "id": message_id,
-                                "delta": {
-                                    "content": text,
-                                    "model": model
+                        ) as stream:
+                            async for text in stream.text_stream:
+                                data = {
+                                    "id": message_id,
+                                    "delta": {
+                                        "content": text,
+                                        "model": model
+                                    }
                                 }
-                            }
-                            yield f"data: {json.dumps(data)}\n\n"
-                    yield "data: [DONE]\n\n"
+                                yield f"data: {json.dumps(data)}\n\n"
+                        yield "data: [DONE]\n\n"
+                    except Exception as e:
+                        logger.error(f"Error in Claude stream: {str(e)}", exc_info=True)
+                        raise
 
                 elif provider == "gemini":
-                    config = types.GenerateContentConfig(
-                        temperature=float(GEMINI_TEMPERATURE or 0.7),
-                        max_output_tokens=int(GEMINI_MAX_TOKENS or 2000),
-                        system_instruction=GEMINI_SYSTEM_PROMPT
-                    )
-                    chat_messages = [msg.content for msg in request.messages if msg.role != "system"]
-                    response = genai_client.models.generate_content_stream(
-                        model=model,
-                        contents=chat_messages,
-                        config=config
-                    )
-                    for chunk in response:
-                        if chunk.text:
-                            data = {
-                                "id": message_id,
-                                "delta": {
-                                    "content": chunk.text,
-                                    "model": model
+                    try:
+                        config = types.GenerateContentConfig(
+                            temperature=float(GEMINI_TEMPERATURE or 0.7),
+                            max_output_tokens=int(GEMINI_MAX_TOKENS or 2000),
+                            system_instruction=GEMINI_SYSTEM_PROMPT
+                        )
+                        chat_messages = [msg.content for msg in request.messages if msg.role != "system"]
+                        
+                        stream = await genai_client.aio.models.generate_content_stream(
+                            model=model,
+                            contents=chat_messages,
+                            config=config
+                        )
+                        async for chunk in stream:
+                            if chunk.text:
+                                data = {
+                                    "id": message_id,
+                                    "delta": {
+                                        "content": chunk.text,
+                                        "model": model
+                                    }
                                 }
-                            }
-                            yield f"data: {json.dumps(data)}\n\n"
-                    yield "data: [DONE]\n\n"
+                                yield f"data: {json.dumps(data)}\n\n"
+                        yield "data: [DONE]\n\n"
+                    except Exception as e:
+                        logger.error(f"Error in Gemini stream: {str(e)}", exc_info=True)
+                        raise
 
             except Exception as e:
                 logger.error(f"Error with {provider} using model {model}: {str(e)}", exc_info=True)
