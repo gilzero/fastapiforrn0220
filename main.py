@@ -3,8 +3,6 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import time
-import asyncio
-from datetime import datetime, UTC
 from dotenv import load_dotenv
 import os
 import uvicorn
@@ -14,6 +12,7 @@ from aiproviders import (
     client, anthropic_client, genai_client, check_provider_health
 )
 from logging_config import logger, debug_with_context
+import traceback
 
 # load env variables
 load_dotenv()
@@ -61,51 +60,45 @@ async def health_check():
             "error": {"message": str(e)}
         }
 
-@app.get("/health/{provider}", response_model=HealthResponse)
+@app.get("/health/{provider}")
 async def provider_health_check(provider: str):
-    """Provider-specific health check"""
+    """Check health of a specific provider."""
     logger.info(f"Provider health check called for: {provider}")
     
+    # First validate the provider
     if provider not in SUPPORTED_PROVIDERS:
-        logger.error(f"Invalid provider requested: {provider}")
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid provider. Supported providers are: {', '.join(SUPPORTED_PROVIDERS)}"
-        )
-
+        raise HTTPException(status_code=400, detail=f"Invalid provider. Supported providers are: {', '.join(SUPPORTED_PROVIDERS)}")
+    
     try:
-        default_model = PROVIDER_MODELS[provider]["default"]
-        
         success, message, duration = await check_provider_health(provider)
         
-        debug_with_context(logger,
-            f"Provider {provider} health check completed",
-            duration=f"{duration:.3f}s",
+        # Fix the debug_with_context call
+        debug_with_context(
+            logger,
+            f"Health check completed for {provider}",  # message as first arg
             success=success,
-            message=message,
-            model=default_model
+            duration=f"{duration:.3f}s"
         )
-
-        if not success:
-            return {
-                "status": "ERROR",
-                "provider": provider,
-                "error": {"message": message},
-                "metrics": {"responseTime": duration}
-            }
-
+        
         return {
-            "status": "OK",
             "provider": provider,
+            "status": "OK" if success else "ERROR",  # Changed from "healthy"/"unhealthy" to "OK"/"ERROR"
             "message": message,
-            "metrics": {"responseTime": duration}
+            "metrics": {
+                "responseTime": f"{duration:.3f}s"
+            },
+            "error": {"message": message} if not success else None
         }
     except Exception as e:
-        logger.error(f"Health check failed for provider {provider}", exc_info=True)
+        logger.error(f"Health check failed for provider {provider}")
+        logger.error(traceback.format_exc())
         return {
-            "status": "ERROR",
             "provider": provider,
-            "error": {"message": str(e)}
+            "status": "ERROR",  # Changed from "error" to "ERROR"
+            "error": {"message": str(e)},
+            "metrics": {
+                "responseTime": "N/A"
+            }
         }
 
 # Chat endpoint

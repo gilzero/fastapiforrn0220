@@ -2,8 +2,6 @@
 from typing import List, Tuple
 import json
 import time
-import asyncio
-from datetime import datetime, UTC
 from dotenv import load_dotenv
 import os
 from fastapi import HTTPException
@@ -274,49 +272,65 @@ async def stream_response(request: ChatRequest, provider: str):
 
 
 async def check_provider_health(provider: str) -> Tuple[bool, str, float]:
-    """
-    Test provider health by sending a standard prompt and validating response.
-    Returns: (success, message, duration)
-    """
+    """Check if a provider is responding correctly."""
+    if provider not in SUPPORTED_PROVIDERS:
+        return False, f"Invalid provider. Supported: {', '.join(SUPPORTED_PROVIDERS)}", 0
+
     start_time = time.time()
-    test_message = "Respond with exactly 'OK' (in uppercase) if you can understand this message."
+    test_message = "What is 2+2? Reply with just the number."  # Deterministic question
     
     try:
         if provider == "gpt":
             response = await client.chat.completions.create(
                 model=PROVIDER_MODELS[provider]["default"],
-                messages=[{"role": "user", "content": test_message}],
-                max_tokens=10
+                messages=[
+                    {"role": "system", "content": "You are a calculator. Answer math questions with just the number, no explanation."},
+                    {"role": "user", "content": test_message}
+                ],
+                max_tokens=5,
+                temperature=0  # Make response deterministic
             )
-            content = response.choices[0].message.content
-
+            duration = time.time() - start_time
+            content = response.choices[0].message.content.strip()
+            
         elif provider == "claude":
             response = await anthropic_client.messages.create(
                 model=PROVIDER_MODELS[provider]["default"],
                 messages=[{"role": "user", "content": test_message}],
-                max_tokens=10
+                system="You are a calculator. Answer math questions with just the number, no explanation.",
+                max_tokens=5,
+                temperature=0
             )
-            content = response.content[0].text
-
-        elif provider == "gemini":
-            response = genai_client.generate_content(
-                model=PROVIDER_MODELS[provider]["default"],
-                contents=test_message
-            )
-            content = response.text
-
-        duration = time.time() - start_time
-        
-        # Validate response
-        if not content or len(content.strip()) == 0:
-            return False, "Empty response from model", duration
-        
-        # Stricter validation
-        content = content.strip()
-        if content != "OK":
-            return False, f"Unexpected response: {content[:50]}", duration
+            duration = time.time() - start_time
+            content = response.content[0].text.strip()
             
-        return True, "Model responding correctly", duration
+        elif provider == "gemini":
+            response = await genai_client.aio.models.generate_content_stream(
+                model=PROVIDER_MODELS[provider]["default"],
+                contents=test_message,
+                config=types.GenerateContentConfig(
+                    max_output_tokens=5,
+                    temperature=0,
+                    system_instruction="You are a calculator. Answer math questions with just the number, no explanation."
+                ),
+                
+            )
+            duration = time.time() - start_time
+            content = ""
+            async for chunk in response:
+                content += chunk.text
+            content = content.strip()
+
+
+            
+        else:
+            return False, f"Unknown provider: {provider}", time.time() - start_time
+
+        # Check for exact match with "4"
+        if content == "4":
+            return True, "Model responding correctly", duration
+        else:
+            return False, f"Unexpected response: {content[:50]}", duration
 
     except Exception as e:
         duration = time.time() - start_time
