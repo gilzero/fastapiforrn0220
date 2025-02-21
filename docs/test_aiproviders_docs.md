@@ -1,5 +1,7 @@
 # `test_aiproviders.py` Documentation
 
+(filepath: tests/test_aiproviders.py)
+
 This file contains unit and integration tests for the `aiproviders.py` module, which handles interactions with various AI providers (OpenAI GPT, Anthropic Claude, and Google Gemini).
 
 ## Test Data

@@ -32,7 +32,11 @@ class ConversationMessage(BaseModel):
         return v
 
 class ChatRequest(BaseModel):
-    messages: List[ConversationMessage]
+    messages: List[ConversationMessage] = Field(
+        ...,  # Required field
+        min_items=1,
+        description="List of conversation messages. Cannot be empty."
+    )
 
     @field_validator('messages')
     @classmethod

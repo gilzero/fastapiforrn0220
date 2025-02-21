@@ -99,147 +99,172 @@ def get_provider_model(provider: str, use_fallback: bool = False) -> str:
 
 
 async def stream_response(request: ChatRequest, provider: str):
-    message_id = f"{provider}-{int(time.time() * 1000)}"
-    stream_start = time.time()
-    chunks_sent = 0
-    
-    async def try_stream_with_model(model: str):
-        """Attempt to stream response with given model."""
-        nonlocal chunks_sent  # Allow access to outer scope variable
-        try:
-            system_prompt = get_system_prompt(request.messages)
-            debug_with_context(logger, 
-                f"Starting stream with model {model}",
-                provider=provider,
-                model=model,
-                system_prompt=system_prompt,
-                message_count=len(request.messages)
-            )
+    """Stream chat responses from an AI provider"""
+    logger.debug("Starting stream_response", 
+        extra={
+            "context": {
+                "provider": provider,
+                "message_count": len(request.messages),
+                "validation_state": "pre-validation"
+            }
+        }
+    )
 
-            if provider == "gpt":
-                messages = [{"role": "system", "content": system_prompt}] + [
-                    {"role": m.role, "content": m.content}
-                    for m in request.messages if m.role != "system"
-                ]
-                debug_with_context(logger,
-                    "Creating OpenAI stream",
+    try:
+        # Remove the empty messages validation since it's now handled by Pydantic
+        message_id = f"{provider}-{int(time.time() * 1000)}"
+        stream_start = time.time()
+        chunks_sent = 0
+        
+        async def try_stream_with_model(model: str):
+            """Attempt to stream response with given model."""
+            nonlocal chunks_sent  # Allow access to outer scope variable
+            try:
+                system_prompt = get_system_prompt(request.messages)
+                debug_with_context(logger, 
+                    f"Starting stream with model {model}",
+                    provider=provider,
                     model=model,
-                    temperature=float(OPENAI_TEMPERATURE or 0.7),
-                    max_tokens=int(OPENAI_MAX_TOKENS or 2000)
+                    system_prompt=system_prompt,
+                    message_count=len(request.messages)
                 )
-                try:
-                    stream = await client.chat.completions.create(
+
+                if provider == "gpt":
+                    messages = [{"role": "system", "content": system_prompt}] + [
+                        {"role": m.role, "content": m.content}
+                        for m in request.messages if m.role != "system"
+                    ]
+                    debug_with_context(logger,
+                        "Creating OpenAI stream",
                         model=model,
-                        messages=messages,
-                        stream=True,
                         temperature=float(OPENAI_TEMPERATURE or 0.7),
-                        max_tokens=int(OPENAI_MAX_TOKENS or 2000),
+                        max_tokens=int(OPENAI_MAX_TOKENS or 2000)
                     )
-                    for chunk in stream:
-                        if hasattr(chunk, 'choices') and chunk.choices and \
-                           hasattr(chunk.choices[0], 'delta') and \
-                           hasattr(chunk.choices[0].delta, 'content') and \
-                           chunk.choices[0].delta.content is not None:
-                            chunks_sent += 1
+                    try:
+                        stream = await client.chat.completions.create(
+                            model=model,
+                            messages=messages,
+                            stream=True,
+                            temperature=float(OPENAI_TEMPERATURE or 0.7),
+                            max_tokens=int(OPENAI_MAX_TOKENS or 2000),
+                        )
+                        for chunk in stream:
+                            if hasattr(chunk, 'choices') and chunk.choices and \
+                               hasattr(chunk.choices[0], 'delta') and \
+                               hasattr(chunk.choices[0].delta, 'content') and \
+                               chunk.choices[0].delta.content is not None:
+                                chunks_sent += 1
+                                data = {
+                                    "id": message_id,
+                                    "delta": {
+                                        "content": chunk.choices[0].delta.content,
+                                        "model": model
+                                    }
+                                }
+                                yield f"data: {json.dumps(data)}\n\n"
+                        yield "data: [DONE]\n\n"
+                        stream_duration = time.time() - stream_start
+                        debug_with_context(logger,
+                            f"Stream completed for {provider}",
+                            duration=f"{stream_duration:.3f}s",
+                            chunks_sent=chunks_sent,
+                            model=model
+                        )
+                    except Exception as e:
+                        logger.error(f"Error in GPT stream: {str(e)}", exc_info=True)
+                        return
+
+                elif provider == "claude":
+                    messages = [
+                        {"role": m.role, "content": m.content}
+                        for m in request.messages if m.role != "system"
+                    ]
+                    async with await anthropic_client.messages.stream(
+                            model=model,
+                            messages=messages,
+                            system=CLAUDE_SYSTEM_PROMPT,
+                            max_tokens=int(ANTHROPIC_MAX_TOKENS or 2000),
+                            temperature=float(ANTHROPIC_TEMPERATURE or 0.7),
+                    ) as stream:
+                        for text in stream.text_stream:
                             data = {
                                 "id": message_id,
                                 "delta": {
-                                    "content": chunk.choices[0].delta.content,
+                                    "content": text,
                                     "model": model
                                 }
                             }
                             yield f"data: {json.dumps(data)}\n\n"
                     yield "data: [DONE]\n\n"
-                    stream_duration = time.time() - stream_start
-                    debug_with_context(logger,
-                        f"Stream completed for {provider}",
-                        duration=f"{stream_duration:.3f}s",
-                        chunks_sent=chunks_sent,
-                        model=model
+
+                elif provider == "gemini":
+                    config = types.GenerateContentConfig(
+                        temperature=float(GEMINI_TEMPERATURE or 0.7),
+                        max_output_tokens=int(GEMINI_MAX_TOKENS or 2000),
+                        system_instruction=GEMINI_SYSTEM_PROMPT
                     )
-                except Exception as e:
-                    logger.error(f"Error in GPT stream: {str(e)}", exc_info=True)
+                    chat_messages = [msg.content for msg in request.messages if msg.role != "system"]
+                    response = genai_client.models.generate_content_stream(
+                        model=model,
+                        contents=chat_messages,
+                        config=config
+                    )
+                    for chunk in response:
+                        if chunk.text:
+                            data = {
+                                "id": message_id,
+                                "delta": {
+                                    "content": chunk.text,
+                                    "model": model
+                                }
+                            }
+                            yield f"data: {json.dumps(data)}\n\n"
+                    yield "data: [DONE]\n\n"
+
+            except Exception as e:
+                logger.error(f"Error with {provider} using model {model}: {str(e)}", exc_info=True)
+                return
+
+        try:
+            # Try with default model
+            default_model = get_provider_model(provider)
+            logger.info(f"Attempting to use default model {default_model} for {provider}")
+            
+            async for chunk in try_stream_with_model(default_model):
+                yield chunk
+                if chunk == "data: [DONE]\n\n":
                     return
 
-            elif provider == "claude":
-                messages = [
-                    {"role": m.role, "content": m.content}
-                    for m in request.messages if m.role != "system"
-                ]
-                async with await anthropic_client.messages.stream(
-                        model=model,
-                        messages=messages,
-                        system=CLAUDE_SYSTEM_PROMPT,
-                        max_tokens=int(ANTHROPIC_MAX_TOKENS or 2000),
-                        temperature=float(ANTHROPIC_TEMPERATURE or 0.7),
-                ) as stream:
-                    for text in stream.text_stream:
-                        data = {
-                            "id": message_id,
-                            "delta": {
-                                "content": text,
-                                "model": model
-                            }
-                        }
-                        yield f"data: {json.dumps(data)}\n\n"
-                yield "data: [DONE]\n\n"
+            # If we reach here, try fallback model
+            fallback_model = get_provider_model(provider, use_fallback=True)
+            logger.warning(f"Default model failed, attempting fallback model {fallback_model} for {provider}")
+            
+            async for chunk in try_stream_with_model(fallback_model):
+                yield chunk
+                if chunk == "data: [DONE]\n\n":
+                    return
 
-            elif provider == "gemini":
-                config = types.GenerateContentConfig(
-                    temperature=float(GEMINI_TEMPERATURE or 0.7),
-                    max_output_tokens=int(GEMINI_MAX_TOKENS or 2000),
-                    system_instruction=GEMINI_SYSTEM_PROMPT
-                )
-                chat_messages = [msg.content for msg in request.messages if msg.role != "system"]
-                response = genai_client.models.generate_content_stream(
-                    model=model,
-                    contents=chat_messages,
-                    config=config
-                )
-                for chunk in response:
-                    if chunk.text:
-                        data = {
-                            "id": message_id,
-                            "delta": {
-                                "content": chunk.text,
-                                "model": model
-                            }
-                        }
-                        yield f"data: {json.dumps(data)}\n\n"
-                yield "data: [DONE]\n\n"
+            # If both models fail
+            raise HTTPException(
+                status_code=500,
+                detail=f"Both default and fallback models failed for provider {provider}"
+            )
 
         except Exception as e:
-            logger.error(f"Error with {provider} using model {model}: {str(e)}", exc_info=True)
-            return
-
-    try:
-        # Try with default model
-        default_model = get_provider_model(provider)
-        logger.info(f"Attempting to use default model {default_model} for {provider}")
-        
-        async for chunk in try_stream_with_model(default_model):
-            yield chunk
-            if chunk == "data: [DONE]\n\n":
-                return
-
-        # If we reach here, try fallback model
-        fallback_model = get_provider_model(provider, use_fallback=True)
-        logger.warning(f"Default model failed, attempting fallback model {fallback_model} for {provider}")
-        
-        async for chunk in try_stream_with_model(fallback_model):
-            yield chunk
-            if chunk == "data: [DONE]\n\n":
-                return
-
-        # If both models fail
-        raise HTTPException(
-            status_code=500,
-            detail=f"Both default and fallback models failed for provider {provider}"
-        )
+            logger.error(f"Stream response error: {str(e)}", exc_info=True)
+            raise HTTPException(status_code=500, detail=str(e))
 
     except Exception as e:
-        logger.error(f"Stream response error: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Error in stream_response",
+            extra={
+                "context": {
+                    "error_type": type(e).__name__,
+                    "original_error": str(e),
+                    "provider": provider
+                }
+            }
+        )
+        raise  # Let FastAPI handle the error type conversion
 
 
 async def check_provider_health(provider: str) -> Tuple[bool, str, float]:

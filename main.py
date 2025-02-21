@@ -112,6 +112,15 @@ async def provider_health_check(provider: str):
 @app.post("/chat/{provider}")
 async def chat(provider: str, request: ChatRequest):
     """Stream chat responses from an AI provider"""
+    logger.debug("Chat endpoint called",
+        extra={
+            "context": {
+                "provider": provider,
+                "message_count": len(request.messages),
+                "validation_state": "post-fastapi-validation"
+            }
+        }
+    )
     start_time = time.time()
 
     try:

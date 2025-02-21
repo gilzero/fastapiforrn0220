@@ -1,3 +1,4 @@
+# filepath: tests/conftest.py
 import pytest
 import os
 import sys
