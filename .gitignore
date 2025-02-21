@@ -24,3 +24,7 @@ logs/debug.log.*
 # ide
 .idea/
 .vscode/
+
+# pytest
+.pytest_cache/
+

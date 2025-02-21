@@ -16,11 +16,11 @@ class MessageRole(str, Enum):
     ASSISTANT = "assistant"
     SYSTEM = "system"
 
-class ChatMessage(BaseModel):
+class ConversationMessage(BaseModel):
     role: MessageRole
     content: str
     timestamp: Optional[int] = None
-    model: Optional[str] = None
+    model: Optional[str] = None  # Kept for response tracking
 
     @field_validator('content')
     @classmethod
@@ -32,8 +32,7 @@ class ChatMessage(BaseModel):
         return v
 
 class ChatRequest(BaseModel):
-    messages: List[ChatMessage]
-    model: str
+    messages: List[ConversationMessage]
 
     @field_validator('messages')
     @classmethod

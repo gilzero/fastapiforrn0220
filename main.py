@@ -9,8 +9,11 @@ from dotenv import load_dotenv
 import os
 import uvicorn
 from models import ChatRequest, HealthResponse
-from aiproviders import stream_response, MODELS
-from logging_config import logger
+from aiproviders import (
+    stream_response, PROVIDER_MODELS, SUPPORTED_PROVIDERS,
+    client, anthropic_client, genai_client
+)
+from logging_config import logger, debug_with_context
 
 # load env variables
 load_dotenv()
@@ -29,48 +32,99 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Log request timing and details"""
+    start_time = time.time()
+    response = await call_next(request)
+    duration = time.time() - start_time
+    
+    debug_with_context(logger,
+        f"Request completed: {request.method} {request.url.path}",
+        duration=f"{duration:.3f}s",
+        status_code=response.status_code,
+        client_host=request.client.host
+    )
+    return response
 
 # Health check endpoints
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
+    """Overall system health check"""
     logger.info("Health check endpoint called")
-    return {"status": "OK", "message": "System operational"}
-
+    try:
+        return {"status": "OK", "message": "System operational"}
+    except Exception as e:
+        logger.error("Health check failed", exc_info=True)
+        return {
+            "status": "ERROR",
+            "error": {"message": str(e)}
+        }
 
 @app.get("/health/{provider}", response_model=HealthResponse)
 async def provider_health_check(provider: str):
+    """Provider-specific health check"""
     logger.info(f"Provider health check called for: {provider}")
-    if provider not in MODELS:
+    
+    if provider not in SUPPORTED_PROVIDERS:
         logger.error(f"Invalid provider requested: {provider}")
-        raise HTTPException(status_code=400, detail=f"Invalid provider: {provider}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid provider. Supported providers are: {', '.join(SUPPORTED_PROVIDERS)}"
+        )
 
-    start_time = time.time()
-    await asyncio.sleep(0.1)
-    duration = time.time() - start_time
+    try:
+        start_time = time.time()
+        default_model = PROVIDER_MODELS[provider]["default"]
 
-    logger.info(f"Provider {provider} health check completed in {duration:.2f}s")
-    return {
-        "status": "OK",
-        "provider": provider,
-        "metrics": {"responseTime": duration}
-    }
+        # Basic provider connectivity test
+        if provider == "gpt":
+            await client.models.list()  # Quick API test
+        elif provider == "claude":
+            await anthropic_client.models.list()
+        elif provider == "gemini":
+            genai_client.list_models()  # Gemini's is sync
 
+        duration = time.time() - start_time
+        
+        debug_with_context(logger,
+            f"Provider {provider} health check completed",
+            duration=f"{duration:.3f}s",
+            model=default_model
+        )
+
+        return {
+            "status": "OK",
+            "provider": provider,
+            "message": f"Using model: {default_model}",
+            "metrics": {"responseTime": duration}
+        }
+    except Exception as e:
+        logger.error(f"Health check failed for provider {provider}", exc_info=True)
+        return {
+            "status": "ERROR",
+            "provider": provider,
+            "error": {"message": str(e)}
+        }
 
 # Chat endpoint
 @app.post("/chat/{provider}")
 async def chat(provider: str, request: ChatRequest):
+    """Stream chat responses from an AI provider"""
     start_time = time.time()
 
     try:
-        if provider not in MODELS:
-            raise HTTPException(status_code=400, detail=f"Invalid provider: {provider}")
-
-        valid_models = [MODELS[provider]["default"], MODELS[provider]["fallback"]]
-        if request.model not in valid_models:
+        if provider not in SUPPORTED_PROVIDERS:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid model for {provider}. Valid models are: {', '.join(valid_models)}"
+                detail=f"Invalid provider. Supported providers are: {', '.join(SUPPORTED_PROVIDERS)}"
             )
+
+        debug_with_context(logger,
+            f"Chat request received for provider: {provider}",
+            message_count=len(request.messages),
+            first_message_role=request.messages[0].role if request.messages else None
+        )
 
         response = StreamingResponse(
             stream_response(request, provider),
@@ -82,14 +136,17 @@ async def chat(provider: str, request: ChatRequest):
             }
         )
 
-        duration = time.time() - start_time
-        logger.info(f"Chat request initialized in {duration:.2f}s")
+        init_duration = time.time() - start_time
+        debug_with_context(logger,
+            "Chat stream response initialized",
+            init_duration=f"{init_duration:.3f}s",
+            provider=provider
+        )
         return response
 
     except Exception as e:
         logger.error(f"Chat endpoint error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Chat error with {provider}: {str(e)}")
-
 
 if __name__ == "__main__":
     port = int(PORT) if PORT else 3050
