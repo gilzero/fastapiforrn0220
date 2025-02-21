@@ -12,6 +12,8 @@ from aiproviders import (
     SUPPORTED_PROVIDERS,
     GENERIC_SYSTEM_PROMPT
 )
+from fastapi.testclient import TestClient
+import json
 
 # Test data
 TEST_MESSAGE = ConversationMessage(
@@ -101,66 +103,90 @@ def test_conversation_message_validation():
 @pytest.mark.asyncio
 async def test_stream_response_gpt():
     """Test GPT stream response"""
+    request = ChatRequest(messages=[
+        ConversationMessage(role="user", content="Test message")
+    ])
+
+    # Mock OpenAI response chunks
     mock_chunk = MagicMock()
     mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta = MagicMock()
     mock_chunk.choices[0].delta.content = "Test response"
 
-    mock_stream = MagicMock()
-    mock_stream.__iter__ = lambda _: iter([mock_chunk])
+    # Mock the AsyncOpenAI client
+    with patch('aiproviders.client') as mock_client:
+        # Setup the async stream mock
+        mock_stream = AsyncMock()
+        mock_stream.__aiter__.return_value = [mock_chunk]
+        
+        # Configure the mock client
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_stream)
 
-    mock_client = AsyncMock()
-    mock_client.chat.completions.create.return_value = mock_stream
+        # Call the stream response
+        chunks = []
+        async for chunk in stream_response(request, "gpt"):
+            chunks.append(chunk)
 
-    with patch('aiproviders.client', mock_client):
-        responses = []
-        async for chunk in stream_response(TEST_REQUEST, "gpt"):
-            responses.append(chunk)
-
-        assert len(responses) > 0
-        assert "Test response" in responses[0]
-        assert "[DONE]" in responses[-1]
+        # Verify the response
+        assert len(chunks) > 0
+        assert any('Test response' in chunk for chunk in chunks)
+        assert chunks[-1] == "data: [DONE]\n\n"
 
 @pytest.mark.asyncio
 async def test_stream_response_claude():
-    """Test Claude stream response"""
-    mock_stream = MagicMock()
-    mock_stream.text_stream = ["Test", "response"]
+    request = ChatRequest(messages=[
+        ConversationMessage(role="user", content="Test message")
+    ])
 
-    class AsyncContextManager:
-        async def __aenter__(self):
-            return mock_stream
-        async def __aexit__(self, *args):
-            pass
+    # Mock Anthropic stream response
+    with patch('aiproviders.anthropic_client') as mock_client:
+        # Setup the async context manager and stream
+        mock_stream = AsyncMock()
+        mock_stream.text_stream = AsyncMock()
+        mock_stream.text_stream.__aiter__.return_value = ["Test response"]
+        mock_client.messages.stream.return_value.__aenter__.return_value = mock_stream
 
-    mock_client = AsyncMock()
-    mock_client.messages.stream.return_value = AsyncContextManager()
+        # Call the stream response
+        response_stream = stream_response(request, "claude")
+        chunks = []
+        async for chunk in response_stream:
+            chunks.append(chunk)
 
-    with patch('aiproviders.anthropic_client', mock_client):
-        responses = []
-        async for chunk in stream_response(TEST_REQUEST, "claude"):
-            responses.append(chunk)
-
-        assert len(responses) > 0
-        assert any("Test" in r for r in responses)
-        assert "[DONE]" in responses[-1]
+        # Verify the response
+        assert any("Test response" in chunk for chunk in chunks)
+        assert chunks[-1] == "data: [DONE]\n\n"
 
 @pytest.mark.asyncio
 async def test_stream_response_gemini():
     """Test Gemini stream response"""
+    request = ChatRequest(messages=[
+        ConversationMessage(role="user", content="Test message")
+    ])
+
+    # Mock Gemini response chunks
     mock_chunk = MagicMock()
     mock_chunk.text = "Test response"
 
-    mock_client = MagicMock()
-    mock_client.models.generate_content_stream.return_value = [mock_chunk]
+    # Mock the Gemini client
+    with patch('aiproviders.genai_client') as mock_client:
+        # Setup the async stream mock
+        mock_stream = AsyncMock()
+        mock_stream.__aiter__.return_value = [mock_chunk]
+        
+        # Configure the mock client's aio attribute
+        mock_client.aio = MagicMock()
+        mock_client.aio.models = MagicMock()
+        mock_client.aio.models.generate_content_stream = AsyncMock(return_value=mock_stream)
 
-    with patch('aiproviders.genai_client', mock_client):
-        responses = []
-        async for chunk in stream_response(TEST_REQUEST, "gemini"):
-            responses.append(chunk)
+        # Call the stream response
+        chunks = []
+        async for chunk in stream_response(request, "gemini"):
+            chunks.append(chunk)
 
-        assert len(responses) > 0
-        assert "Test response" in responses[0]
-        assert "[DONE]" in responses[-1]
+        # Verify the response
+        assert len(chunks) > 0
+        assert any('Test response' in chunk for chunk in chunks)
+        assert chunks[-1] == "data: [DONE]\n\n"
 
 @pytest.mark.asyncio
 async def test_stream_response_invalid_provider():
