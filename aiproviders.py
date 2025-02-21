@@ -70,8 +70,23 @@ genai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 def get_system_prompt(messages: List[ConversationMessage]) -> str:
     """Get system prompt from messages or return generic default."""
+    if not messages:
+        logger.warning("Empty messages list, using generic system prompt")
+        return GENERIC_SYSTEM_PROMPT
+
     system_messages = [msg.content for msg in messages if msg.role == "system"]
-    return " ".join(system_messages) if system_messages else GENERIC_SYSTEM_PROMPT
+    
+    # Filter out empty or whitespace-only system messages
+    valid_system_messages = [
+        msg for msg in system_messages 
+        if msg and msg.strip() and len(''.join(c for c in msg if not c.isspace() and c != '.')) > 0
+    ]
+    
+    if valid_system_messages:
+        return " ".join(valid_system_messages)
+    
+    logger.debug("No valid system messages found, using generic system prompt")
+    return GENERIC_SYSTEM_PROMPT
 
 
 def get_provider_model(provider: str, use_fallback: bool = False) -> str:
@@ -90,6 +105,7 @@ async def stream_response(request: ChatRequest, provider: str):
     
     async def try_stream_with_model(model: str):
         """Attempt to stream response with given model."""
+        nonlocal chunks_sent  # Allow access to outer scope variable
         try:
             system_prompt = get_system_prompt(request.messages)
             debug_with_context(logger, 
@@ -111,39 +127,46 @@ async def stream_response(request: ChatRequest, provider: str):
                     temperature=float(OPENAI_TEMPERATURE or 0.7),
                     max_tokens=int(OPENAI_MAX_TOKENS or 2000)
                 )
-                stream = client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    stream=True,
-                    temperature=float(OPENAI_TEMPERATURE or 0.7),
-                    max_tokens=int(OPENAI_MAX_TOKENS or 2000),
-                )
-                for chunk in stream:
-                    if chunk.choices[0].delta.content is not None:
-                        chunks_sent += 1
-                        data = {
-                            "id": message_id,
-                            "delta": {
-                                "content": chunk.choices[0].delta.content,
-                                "model": model
+                try:
+                    stream = await client.chat.completions.create(
+                        model=model,
+                        messages=messages,
+                        stream=True,
+                        temperature=float(OPENAI_TEMPERATURE or 0.7),
+                        max_tokens=int(OPENAI_MAX_TOKENS or 2000),
+                    )
+                    for chunk in stream:
+                        if hasattr(chunk, 'choices') and chunk.choices and \
+                           hasattr(chunk.choices[0], 'delta') and \
+                           hasattr(chunk.choices[0].delta, 'content') and \
+                           chunk.choices[0].delta.content is not None:
+                            chunks_sent += 1
+                            data = {
+                                "id": message_id,
+                                "delta": {
+                                    "content": chunk.choices[0].delta.content,
+                                    "model": model
+                                }
                             }
-                        }
-                        yield f"data: {json.dumps(data)}\n\n"
-                yield "data: [DONE]\n\n"
-                stream_duration = time.time() - stream_start
-                debug_with_context(logger,
-                    f"Stream completed for {provider}",
-                    duration=f"{stream_duration:.3f}s",
-                    chunks_sent=chunks_sent,
-                    model=model
-                )
+                            yield f"data: {json.dumps(data)}\n\n"
+                    yield "data: [DONE]\n\n"
+                    stream_duration = time.time() - stream_start
+                    debug_with_context(logger,
+                        f"Stream completed for {provider}",
+                        duration=f"{stream_duration:.3f}s",
+                        chunks_sent=chunks_sent,
+                        model=model
+                    )
+                except Exception as e:
+                    logger.error(f"Error in GPT stream: {str(e)}", exc_info=True)
+                    return
 
             elif provider == "claude":
                 messages = [
                     {"role": m.role, "content": m.content}
                     for m in request.messages if m.role != "system"
                 ]
-                with anthropic_client.messages.stream(
+                async with await anthropic_client.messages.stream(
                         model=model,
                         messages=messages,
                         system=CLAUDE_SYSTEM_PROMPT,
@@ -217,3 +240,53 @@ async def stream_response(request: ChatRequest, provider: str):
     except Exception as e:
         logger.error(f"Stream response error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def check_provider_health(provider: str) -> Tuple[bool, str, float]:
+    """
+    Test provider health by sending a standard prompt and validating response.
+    Returns: (success, message, duration)
+    """
+    start_time = time.time()
+    test_message = "Respond with exactly 'OK' (in uppercase) if you can understand this message."
+    
+    try:
+        if provider == "gpt":
+            response = await client.chat.completions.create(
+                model=PROVIDER_MODELS[provider]["default"],
+                messages=[{"role": "user", "content": test_message}],
+                max_tokens=10
+            )
+            content = response.choices[0].message.content
+
+        elif provider == "claude":
+            response = await anthropic_client.messages.create(
+                model=PROVIDER_MODELS[provider]["default"],
+                messages=[{"role": "user", "content": test_message}],
+                max_tokens=10
+            )
+            content = response.content[0].text
+
+        elif provider == "gemini":
+            response = genai_client.generate_content(
+                model=PROVIDER_MODELS[provider]["default"],
+                contents=test_message
+            )
+            content = response.text
+
+        duration = time.time() - start_time
+        
+        # Validate response
+        if not content or len(content.strip()) == 0:
+            return False, "Empty response from model", duration
+        
+        # Stricter validation
+        content = content.strip()
+        if content != "OK":
+            return False, f"Unexpected response: {content[:50]}", duration
+            
+        return True, "Model responding correctly", duration
+
+    except Exception as e:
+        duration = time.time() - start_time
+        return False, str(e), duration

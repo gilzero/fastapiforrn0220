@@ -11,7 +11,7 @@ import uvicorn
 from models import ChatRequest, HealthResponse
 from aiproviders import (
     stream_response, PROVIDER_MODELS, SUPPORTED_PROVIDERS,
-    client, anthropic_client, genai_client
+    client, anthropic_client, genai_client, check_provider_health
 )
 from logging_config import logger, debug_with_context
 
@@ -74,29 +74,30 @@ async def provider_health_check(provider: str):
         )
 
     try:
-        start_time = time.time()
         default_model = PROVIDER_MODELS[provider]["default"]
-
-        # Basic provider connectivity test
-        if provider == "gpt":
-            await client.models.list()  # Quick API test
-        elif provider == "claude":
-            await anthropic_client.models.list()
-        elif provider == "gemini":
-            genai_client.list_models()  # Gemini's is sync
-
-        duration = time.time() - start_time
+        
+        success, message, duration = await check_provider_health(provider)
         
         debug_with_context(logger,
             f"Provider {provider} health check completed",
             duration=f"{duration:.3f}s",
+            success=success,
+            message=message,
             model=default_model
         )
+
+        if not success:
+            return {
+                "status": "ERROR",
+                "provider": provider,
+                "error": {"message": message},
+                "metrics": {"responseTime": duration}
+            }
 
         return {
             "status": "OK",
             "provider": provider,
-            "message": f"Using model: {default_model}",
+            "message": message,
             "metrics": {"responseTime": duration}
         }
     except Exception as e:
