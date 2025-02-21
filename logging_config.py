@@ -93,19 +93,23 @@ def debug_with_context(logger: logging.Logger, message: str, **context: Any) -> 
     extra = {'extra_context': context}
     logger.debug(message, extra=extra)
 
-# Configure conversation logger
+# Configure conversation logger if enabled
 conversation_logger = logging.getLogger('conversation_logger')
 conversation_logger.setLevel(logging.INFO)
 
-# Configure rotating file handler for conversations.log
-conversation_handler = logging.handlers.RotatingFileHandler(
-    Path(LOG_SETTINGS['DIR']) / 'conversations.log',
-    maxBytes=10 * 1024 * 1024,  # 10MB
-    backupCount=5,
-    encoding='utf-8'
-)
-conversation_handler.setFormatter(logging.Formatter('%(message)s'))
-conversation_logger.addHandler(conversation_handler)
+if LOG_SETTINGS['ENABLE_CONVERSATION_LOGGING']:
+    # Ensure logs directory exists
+    Path(LOG_SETTINGS['DIR']).mkdir(exist_ok=True)
+    
+    # Configure rotating file handler for conversations.log
+    conversation_handler = logging.handlers.RotatingFileHandler(
+        Path(LOG_SETTINGS['DIR']) / 'conversations.log',
+        maxBytes=LOG_SETTINGS['CONVERSATION_LOG_MAX_SIZE'],
+        backupCount=LOG_SETTINGS['CONVERSATION_LOG_BACKUP_COUNT'],
+        encoding='utf-8'
+    )
+    conversation_handler.setFormatter(logging.Formatter('%(message)s'))
+    conversation_logger.addHandler(conversation_handler)
 
 def generate_conversation_id() -> str:
     """Generate a unique conversation ID."""
@@ -134,13 +138,16 @@ def parse_streaming_response(response_chunks: List[str]) -> str:
 
 def log_conversation_entry(conversation_id: str, user_prompt: str, ai_response: str) -> None:
     """
-    Log a conversation entry to conversations.log in JSON format.
+    Log a conversation entry to conversations.log in JSON format if conversation logging is enabled.
     
     Args:
         conversation_id: Unique identifier for the conversation
         user_prompt: The user's input message
         ai_response: The complete AI response
     """
+    if not LOG_SETTINGS['ENABLE_CONVERSATION_LOGGING']:
+        return
+        
     try:
         # Parse the streaming response to extract clean content
         clean_response = parse_streaming_response(ai_response.split('\n'))

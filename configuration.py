@@ -58,7 +58,11 @@ LOG_SETTINGS = {
     'FILE_PATH': os.getenv("LOG_FILE_PATH", "logs/app.log"),
     'FORMAT': '%(timestamp)s - %(name)s - %(levelname)s - %(message)s',
     'MAX_BYTES': int(os.getenv("LOG_MAX_BYTES", 10485760)),
-    'BACKUP_COUNT': int(os.getenv("LOG_BACKUP_COUNT", 5))
+    'BACKUP_COUNT': int(os.getenv("LOG_BACKUP_COUNT", 5)),
+    # Conversation logging settings
+    'ENABLE_CONVERSATION_LOGGING': os.getenv('ENABLE_CONVERSATION_LOGGING', 'true').lower() == 'true',
+    'CONVERSATION_LOG_MAX_SIZE': int(os.getenv('CONVERSATION_LOG_MAX_SIZE', 10485760)),  # 10MB
+    'CONVERSATION_LOG_BACKUP_COUNT': int(os.getenv('CONVERSATION_LOG_BACKUP_COUNT', 5))
 }
 
 # API Keys
