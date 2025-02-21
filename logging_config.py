@@ -6,6 +6,7 @@ import sys
 import json
 from datetime import datetime, timezone
 from typing import Optional, Dict, List, Tuple, Any
+from uuid import uuid4
 from configuration import LOG_SETTINGS
 
 class CustomFormatter(logging.Formatter):
@@ -91,6 +92,70 @@ def debug_with_context(logger: logging.Logger, message: str, **context: Any) -> 
     """Log a debug message with additional context."""
     extra = {'extra_context': context}
     logger.debug(message, extra=extra)
+
+# Configure conversation logger
+conversation_logger = logging.getLogger('conversation_logger')
+conversation_logger.setLevel(logging.INFO)
+
+# Configure rotating file handler for conversations.log
+conversation_handler = logging.handlers.RotatingFileHandler(
+    Path(LOG_SETTINGS['DIR']) / 'conversations.log',
+    maxBytes=10 * 1024 * 1024,  # 10MB
+    backupCount=5,
+    encoding='utf-8'
+)
+conversation_handler.setFormatter(logging.Formatter('%(message)s'))
+conversation_logger.addHandler(conversation_handler)
+
+def generate_conversation_id() -> str:
+    """Generate a unique conversation ID."""
+    return str(uuid4())
+
+def parse_streaming_response(response_chunks: List[str]) -> str:
+    """
+    Parse streaming response chunks and extract the actual content.
+    
+    Args:
+        response_chunks: List of response chunks in streaming format
+    Returns:
+        Extracted content as a single string
+    """
+    content = []
+    for chunk in response_chunks:
+        if chunk.startswith('data: ') and not chunk.strip().endswith('[DONE]'):
+            try:
+                # Parse the JSON data after 'data: '
+                data = json.loads(chunk[6:].strip())
+                if 'delta' in data and 'content' in data['delta']:
+                    content.append(data['delta']['content'])
+            except json.JSONDecodeError:
+                continue
+    return ''.join(content)
+
+def log_conversation_entry(conversation_id: str, user_prompt: str, ai_response: str) -> None:
+    """
+    Log a conversation entry to conversations.log in JSON format.
+    
+    Args:
+        conversation_id: Unique identifier for the conversation
+        user_prompt: The user's input message
+        ai_response: The complete AI response
+    """
+    try:
+        # Parse the streaming response to extract clean content
+        clean_response = parse_streaming_response(ai_response.split('\n'))
+        
+        entry = {
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'conversation_id': conversation_id,
+            'user_prompt': user_prompt,
+            'ai_response': clean_response
+        }
+        conversation_logger.info(json.dumps(entry, ensure_ascii=False))
+    except Exception as e:
+        # Log any errors to the main application log
+        logging.getLogger().error(f"Failed to log conversation entry: {str(e)}", 
+                                extra={'conversation_id': conversation_id})
 
 # initialize the root logger.  Individual modules should get their own loggers.
 logger = setup_logging()

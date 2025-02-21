@@ -8,7 +8,7 @@ from google import genai
 from google.genai import types
 from fastapi import HTTPException
 from models import ChatRequest, ConversationMessage
-from logging_config import logger, debug_with_context
+from logging_config import logger, debug_with_context, generate_conversation_id, log_conversation_entry
 from configuration import (
     # API Keys
     OPENAI_API_KEY,
@@ -178,6 +178,8 @@ async def _stream_response_gemini(chat_messages: List[str], model: str, message_
         raise
 
 async def stream_response(request: ChatRequest, provider: str):
+    conversation_id = generate_conversation_id()
+    response_buffer = []
     """Stream chat responses from an AI provider"""
     logger.debug("Starting stream_response", 
         extra={
@@ -213,6 +215,7 @@ async def stream_response(request: ChatRequest, provider: str):
                         for m in request.messages if m.role != "system"
                     ]
                     async for chunk in _stream_response_gpt(messages, model, message_id):
+                        response_buffer.append(chunk)
                         yield chunk
 
                 elif provider == "claude":
@@ -221,11 +224,13 @@ async def stream_response(request: ChatRequest, provider: str):
                         for m in request.messages if m.role != "system"
                     ]
                     async for chunk in _stream_response_claude(messages, model, message_id):
+                        response_buffer.append(chunk)
                         yield chunk
 
                 elif provider == "gemini":
                     chat_messages = [msg.content for msg in request.messages if msg.role != "system"]
                     async for chunk in _stream_response_gemini(chat_messages, model, message_id):
+                        response_buffer.append(chunk)
                         yield chunk
 
             except Exception as e:
@@ -247,6 +252,9 @@ async def stream_response(request: ChatRequest, provider: str):
                         model=default_model
                     )
                     stream_completed = True
+                    # Log the complete conversation before returning
+                    complete_response = ''.join(response_buffer)
+                    log_conversation_entry(conversation_id, request.messages[-1].content, complete_response)
                     yield chunk
                     return
                 chunks_sent += 1
