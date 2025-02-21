@@ -3,13 +3,7 @@ from enum import Enum
 from typing import List, Optional, Dict
 from pydantic import BaseModel, Field, field_validator
 from typing_extensions import Literal
-from dotenv import load_dotenv
-import os
-
-load_dotenv()
-
-MAX_MESSAGE_LENGTH = int(os.getenv("MAX_MESSAGE_LENGTH", 6000))
-MAX_MESSAGES_IN_CONTEXT = int(os.getenv("MAX_MESSAGES_IN_CONTEXT", 50))
+from configuration import MAX_MESSAGE_LENGTH, MAX_MESSAGES_IN_CONTEXT, MIN_MESSAGE_LENGTH, SUPPORTED_PROVIDERS  # Import from configuration
 
 class MessageRole(str, Enum):
     USER = "user"
@@ -27,13 +21,15 @@ class ConversationMessage(BaseModel):
     def validate_content_length(cls, v):
         if not v.strip():
             raise ValueError("Message content cannot be empty")
+        if len(v.strip()) < MIN_MESSAGE_LENGTH:
+            raise ValueError(f"Message content must be at least {MIN_MESSAGE_LENGTH} characters")
         if len(v) > MAX_MESSAGE_LENGTH:
             raise ValueError(f"Message exceeds maximum length of {MAX_MESSAGE_LENGTH} characters")
         return v
 
 class ChatRequest(BaseModel):
     messages: List[ConversationMessage] = Field(
-        ...,  # Required field
+        ...,
         min_length=1,
         description="List of conversation messages. Cannot be empty."
     )

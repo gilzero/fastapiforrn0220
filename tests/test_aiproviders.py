@@ -7,7 +7,7 @@ from aiproviders import (
     get_system_prompt,
     get_provider_model,
     stream_response,
-    check_provider_health,
+    health_check_provider,
     PROVIDER_MODELS,
     SUPPORTED_PROVIDERS,
     GENERIC_SYSTEM_PROMPT
@@ -242,7 +242,7 @@ async def test_check_provider_health_success():
     mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
     with patch('aiproviders.client', mock_client):
-        success, message, duration = await check_provider_health("gpt")
+        success, message, duration = await health_check_provider("gpt")
         assert success is True
         assert "responding correctly" in message
         assert isinstance(duration, float)
@@ -254,7 +254,7 @@ async def test_check_provider_health_failure():
     mock_client.chat.completions.create.side_effect = Exception("Test error")
 
     with patch('aiproviders.client', mock_client):
-        success, message, duration = await check_provider_health("gpt")
+        success, message, duration = await health_check_provider("gpt")
         assert success is False
         assert "Test error" in message
         assert isinstance(duration, float) 

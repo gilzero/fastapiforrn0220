@@ -133,7 +133,7 @@ async def test_provider_health_check_success(test_client, mock_debug_context, pr
     """Test provider-specific health check endpoints"""
     mock_response = (True, f"{provider} service operational", 0.1)
     
-    with patch('main.check_provider_health', new_callable=AsyncMock) as mock_check:
+    with patch('main.health_check_provider', new_callable=AsyncMock) as mock_check:
         mock_check.return_value = mock_response
         response = test_client.get(f"/health/{provider}")
         
@@ -153,7 +153,7 @@ async def test_provider_health_check_failure(provider):
     """Test provider health check when provider is unhealthy"""
     mock_response = (False, f"{provider} API Error", 0.1)
     
-    with patch('main.check_provider_health', new_callable=AsyncMock) as mock_check:
+    with patch('main.health_check_provider', new_callable=AsyncMock) as mock_check:
         mock_check.return_value = mock_response
         with patch('main.debug_with_context') as mock_debug:  # Mock debug_with_context
             response = client.get(f"/health/{provider}")
@@ -261,7 +261,7 @@ def test_cors_middleware(test_cors_client):
 @pytest.mark.parametrize("provider", TEST_PROVIDERS.keys())
 def test_internal_server_error_handling(provider):
     """Test handling of internal server errors for each provider"""
-    with patch('main.check_provider_health', side_effect=Exception(f"Unexpected {provider} error")):
+    with patch('main.health_check_provider', side_effect=Exception(f"Unexpected {provider} error")):
         response = client.get(f"/health/{provider}")
         assert response.status_code == 200  # Health check handles its own errors
         data = response.json()

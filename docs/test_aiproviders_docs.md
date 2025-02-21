@@ -131,13 +131,13 @@ async def test_stream_response_gemini(mocker):
 @pytest.mark.asyncio
 async def test_provider_health():
     # Success case
-    success, message, duration = await check_provider_health("gpt")
+    success, message, duration = await health_check_provider("gpt")
     assert success
     assert "Model responding correctly" in message
     assert isinstance(duration, float)
 
     # Failure case
-    success, message, duration = await check_provider_health("invalid")
+    success, message, duration = await health_check_provider("invalid")
     assert not success
     assert isinstance(message, str)
     assert isinstance(duration, float)

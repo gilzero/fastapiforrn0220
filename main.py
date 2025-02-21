@@ -3,21 +3,14 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import time
-from dotenv import load_dotenv
-import os
 import uvicorn
 from models import ChatRequest, HealthResponse
 from aiproviders import (
-    stream_response, PROVIDER_MODELS, SUPPORTED_PROVIDERS,
-    client, anthropic_client, genai_client, check_provider_health
+    stream_response, PROVIDER_MODELS, health_check_provider
 )
 from logging_config import logger, debug_with_context
 import traceback
-
-# load env variables
-load_dotenv()
-
-PORT = os.getenv("PORT")
+from configuration import PORT, SUPPORTED_PROVIDERS  # Import from configuration
 
 # Initialize FastAPI
 app = FastAPI()
@@ -70,7 +63,7 @@ async def provider_health_check(provider: str):
         raise HTTPException(status_code=400, detail=f"Invalid provider. Supported providers are: {', '.join(SUPPORTED_PROVIDERS)}")
     
     try:
-        success, message, duration = await check_provider_health(provider)
+        success, message, duration = await health_check_provider(provider)
         
         # Fix the debug_with_context call
         debug_with_context(
@@ -116,13 +109,21 @@ async def chat(provider: str, request: ChatRequest):
     )
     start_time = time.time()
 
-    try:
-        if provider not in SUPPORTED_PROVIDERS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid provider. Supported providers are: {', '.join(SUPPORTED_PROVIDERS)}"
-            )
+    # Validate provider first
+    if provider not in SUPPORTED_PROVIDERS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid provider. Supported providers are: {', '.join(SUPPORTED_PROVIDERS)}"
+        )
 
+    # Validate messages
+    if not request.messages:
+        raise HTTPException(
+            status_code=422,
+            detail="No messages provided in request"
+        )
+
+    try:
         debug_with_context(logger,
             f"Chat request received for provider: {provider}",
             message_count=len(request.messages),
@@ -152,5 +153,4 @@ async def chat(provider: str, request: ChatRequest):
         raise HTTPException(status_code=500, detail=f"Chat error with {provider}: {str(e)}")
 
 if __name__ == "__main__":
-    port = int(PORT) if PORT else 3050
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host="0.0.0.0", port=PORT)

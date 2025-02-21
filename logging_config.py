@@ -6,6 +6,7 @@ import sys
 import json
 from datetime import datetime, timezone
 from typing import Optional, Dict, List, Tuple, Any
+from configuration import LOG_SETTINGS
 
 class CustomFormatter(logging.Formatter):
     """Custom formatter that includes timezone-aware UTC timestamp and formats debug context."""
@@ -43,16 +44,16 @@ def create_file_handler(
     return handler
 
 def setup_logging(
-    log_dir: str = "logs",
+    log_dir: str = LOG_SETTINGS['DIR'],
     logger_name: Optional[str] = None,
-    max_bytes: int = 10485760,
-    backup_count: int = 5,
-    log_format: str = '%(timestamp)s - %(name)s - %(levelname)s - %(message)s',
+    max_bytes: int = LOG_SETTINGS['MAX_BYTES'],
+    backup_count: int = LOG_SETTINGS['BACKUP_COUNT'],
+    log_format: str = LOG_SETTINGS['FORMAT'],
     clear_handlers: bool = True
 ) -> logging.Logger:
     """Set up logging configuration with file and console handlers."""
     logger = logging.getLogger(logger_name) if logger_name else logging.getLogger()
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(getattr(logging, LOG_SETTINGS['LEVEL']))
 
     if clear_handlers:
         for handler in logger.handlers[:]:
@@ -67,7 +68,7 @@ def setup_logging(
         raise OSError(f"Failed to create log directory {log_dir}: {e}")
 
     handlers: List[Tuple[Path, int, Optional[int], Optional[int]]] = [
-        (log_dir_path / "app.log", logging.INFO, max_bytes, backup_count),
+        (Path(LOG_SETTINGS['FILE_PATH']), logging.INFO, max_bytes, backup_count),
         (log_dir_path / "error.log", logging.ERROR, max_bytes, backup_count),
         (log_dir_path / "debug.log", logging.DEBUG, max_bytes, backup_count)
     ]
