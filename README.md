@@ -134,6 +134,19 @@ pytest tests/ -v
 
 # Run with coverage
 pytest tests/ --cov=. -v
+
+# run with coverage and generate html report
+pip install coverage
+
+  
+coverage run -m pytest
+
+
+(Generate a Coverage Report:)
+coverage report -m
+
+coverage html
+(Then open htmlcov/index.html in a browser.)
 ```
 
 ## Documentation
@@ -177,7 +190,7 @@ This project is developed by [Weiming](https://weiming.ai).
 
 ## Todo
 
-- [ ] todo 1 
+- [ ] Known issue to fix: begging of the ai response truncation (not sure backend or frontend issue)
 - [ ] todo 2 
 - [ ] todo 3 
 - [ ] todo 4 

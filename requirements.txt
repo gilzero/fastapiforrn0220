@@ -9,6 +9,7 @@ cachetools==5.5.1
 certifi==2025.1.31
 charset-normalizer==3.4.1
 click==8.1.8
+coverage==7.6.12
 Deprecated==1.2.18
 distro==1.9.0
 fastapi==0.115.8
@@ -36,14 +37,6 @@ iniconfig==2.0.0
 jiter==0.8.2
 jsonpatch==1.33
 jsonpointer==3.0.0
-langchain==0.3.19
-langchain-anthropic==0.3.7
-langchain-core==0.3.35
-langchain-google-genai==2.0.9
-langchain-groq==0.2.4
-langchain-openai==0.3.6
-langchain-text-splitters==0.3.6
-langsmith==0.3.8
 limits==4.0.1
 multidict==6.1.0
 numpy==1.26.4
@@ -58,11 +51,13 @@ psutil==7.0.0
 pyasn1==0.6.1
 pyasn1_modules==0.4.1
 pydantic==2.10.6
+pydantic-settings==2.8.0
 pydantic_core==2.27.2
 PyJWT==2.9.0
 pyparsing==3.2.1
 pytest==8.3.4
 pytest-asyncio==0.25.3
+pytest-cov==6.0.0
 pytest-mock==3.14.0
 python-decouple==3.8
 python-dotenv==1.0.1
