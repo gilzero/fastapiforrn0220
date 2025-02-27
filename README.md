@@ -190,7 +190,7 @@ This project is developed by [Weiming](https://weiming.ai).
 
 ## Todo
 
-- [ ] Known issue to fix: begging of the ai response truncation (not sure backend or frontend issue)
+- [ ] Known issue to fix: beginning of the ai response truncation (not sure backend or frontend issue)
 - [ ] todo 2 
 - [ ] todo 3 
 - [ ] todo 4 

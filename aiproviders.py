@@ -177,6 +177,31 @@ async def _stream_response_gemini(chat_messages: List[str], model: str, message_
         logger.error(f"Error in Gemini stream: {str(e)}", exc_info=True)
         raise
 
+async def _stream_response_groq(messages: List[dict], model: str, message_id: str):
+    """Handle streaming responses from Groq models."""
+    try:
+        stream = await groq_client.chat.completions.create(
+            model=model,
+            messages=messages,
+            stream=True,
+            temperature=float(GROQ_TEMPERATURE or 0.7),
+            max_tokens=int(GROQ_MAX_TOKENS or 2000),
+        )
+        async for chunk in stream:
+            if chunk.choices[0].delta.content is not None:
+                data = {
+                    "id": message_id,
+                    "delta": {
+                        "content": chunk.choices[0].delta.content,
+                        "model": model
+                    }
+                }
+                yield f"data: {json.dumps(data)}\n\n"
+        yield "data: [DONE]\n\n"
+    except Exception as e:
+        logger.error(f"Error in Groq stream: {str(e)}", exc_info=True)
+        raise
+
 async def stream_response(request: ChatRequest, provider: str):
     conversation_id = generate_conversation_id()
     response_buffer = []
@@ -230,6 +255,15 @@ async def stream_response(request: ChatRequest, provider: str):
                 elif provider == "gemini":
                     chat_messages = [msg.content for msg in request.messages if msg.role != "system"]
                     async for chunk in _stream_response_gemini(chat_messages, model, message_id):
+                        response_buffer.append(chunk)
+                        yield chunk
+
+                elif provider == "groq":
+                    messages = [{"role": "system", "content": system_prompt}] + [
+                        {"role": m.role, "content": m.content}
+                        for m in request.messages if m.role != "system"
+                    ]
+                    async for chunk in _stream_response_groq(messages, model, message_id):
                         response_buffer.append(chunk)
                         yield chunk
 
@@ -345,6 +379,19 @@ async def _health_check_gemini(model: str, test_message: str) -> str:
         content += chunk.text
     return content.strip()
 
+async def _health_check_groq(model: str, test_message: str) -> str:
+    """Check health of Groq provider."""
+    response = await groq_client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": "You are a calculator. Answer math questions with just the number, no explanation."},
+            {"role": "user", "content": test_message}
+        ],
+        max_tokens=5,
+        temperature=0  # Make response deterministic
+    )
+    return response.choices[0].message.content.strip()
+
 async def health_check_provider(provider: str) -> Tuple[bool, str, float]:
     """Check if a provider is responding correctly."""
     if provider not in SUPPORTED_PROVIDERS:
@@ -362,6 +409,9 @@ async def health_check_provider(provider: str) -> Tuple[bool, str, float]:
             
         elif provider == "gemini":
             content = await _health_check_gemini(PROVIDER_MODELS[provider]["default"], test_message)
+            
+        elif provider == "groq":
+            content = await _health_check_groq(PROVIDER_MODELS[provider]["default"], test_message)
             
         else:
             return False, f"Unknown provider: {provider}", time.time() - start_time
