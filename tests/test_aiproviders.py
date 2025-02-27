@@ -4,14 +4,16 @@ from datetime import datetime, UTC
 from unittest.mock import AsyncMock, MagicMock, patch
 from models import ChatRequest, ConversationMessage, MessageRole
 from aiproviders import (
-    get_system_prompt,
     get_provider_model,
     stream_response,
-    health_check_provider,
-    PROVIDER_MODELS,
+    health_check_provider
+)
+from configuration import (
+    PROVIDER_SETTINGS,
     SUPPORTED_PROVIDERS,
     GENERIC_SYSTEM_PROMPT
 )
+from prompt_engineering import get_system_prompt
 from fastapi.testclient import TestClient
 import json
 
@@ -44,12 +46,12 @@ def test_get_system_prompt_without_system_message():
 def test_get_provider_model_default():
     """Test get_provider_model returns correct default model"""
     model = get_provider_model("gpt")
-    assert model == PROVIDER_MODELS["gpt"]["default"]
+    assert model == PROVIDER_SETTINGS["gpt"]["default_model"]
 
 def test_get_provider_model_fallback():
     """Test get_provider_model returns correct fallback model"""
     model = get_provider_model("gpt", use_fallback=True)
-    assert model == PROVIDER_MODELS["gpt"]["fallback"]
+    assert model == PROVIDER_SETTINGS["gpt"]["fallback_model"]
 
 def test_get_provider_model_invalid():
     """Test get_provider_model raises error for invalid provider"""

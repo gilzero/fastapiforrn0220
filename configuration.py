@@ -1,5 +1,5 @@
 # filepath: configuration.py
-from typing import List
+from typing import List, Dict, Any, Type
 from dotenv import load_dotenv
 import os
 
@@ -21,8 +21,9 @@ SENTRY_SEND_DEFAULT_PII = os.getenv("SENTRY_SEND_DEFAULT_PII", "true").lower() =
 SUPPORTED_PROVIDERS = os.getenv("SUPPORTED_PROVIDERS", "gpt,claude,gemini").split(",")
 
 # Validate supported providers
+VALID_PROVIDERS = ["gpt", "claude", "gemini", "groq"]
 for provider in SUPPORTED_PROVIDERS:
-    if provider not in ["gpt", "claude", "gemini", "groq"]:
+    if provider not in VALID_PROVIDERS:
         raise ValueError(f"Environment Error: Invalid provider '{provider}' in SUPPORTED_PROVIDERS")
 
 # Message Validation
@@ -92,22 +93,10 @@ PYSERVER_ENV = os.getenv("PYSERVER_ENV", "development")
 # Test Configuration
 ENABLE_FULL_RATE_LIMIT_TEST = os.getenv("ENABLE_FULL_RATE_LIMIT_TEST", "false").lower() == "true"
 
-# Add after API key definitions
-def validate_api_keys():
-    for provider, key in {
-        "gpt": OPENAI_API_KEY,
-        "claude": ANTHROPIC_API_KEY,
-        "gemini": GEMINI_API_KEY,
-        "groq": GROQ_API_KEY
-    }.items():
-        if provider in SUPPORTED_PROVIDERS and not key:
-            raise ValueError(f"API key for {provider} is required but not set")
-
-validate_api_keys()
-
-# Provider Configuration
+# Centralized provider configuration
 PROVIDER_SETTINGS = {
     'gpt': {
+        'api_key': OPENAI_API_KEY,
         'default_model': OPENAI_MODEL_DEFAULT,
         'fallback_model': OPENAI_MODEL_FALLBACK,
         'temperature': OPENAI_TEMPERATURE,
@@ -115,6 +104,7 @@ PROVIDER_SETTINGS = {
         'system_prompt': GPT_SYSTEM_PROMPT
     },
     'claude': {
+        'api_key': ANTHROPIC_API_KEY,
         'default_model': ANTHROPIC_MODEL_DEFAULT,
         'fallback_model': ANTHROPIC_MODEL_FALLBACK,
         'temperature': ANTHROPIC_TEMPERATURE,
@@ -122,6 +112,7 @@ PROVIDER_SETTINGS = {
         'system_prompt': CLAUDE_SYSTEM_PROMPT
     },
     'gemini': {
+        'api_key': GEMINI_API_KEY,
         'default_model': GEMINI_MODEL_DEFAULT,
         'fallback_model': GEMINI_MODEL_FALLBACK,
         'temperature': GEMINI_TEMPERATURE,
@@ -129,6 +120,7 @@ PROVIDER_SETTINGS = {
         'system_prompt': GEMINI_SYSTEM_PROMPT
     },
     'groq': {
+        'api_key': GROQ_API_KEY,
         'default_model': GROQ_MODEL_DEFAULT,
         'fallback_model': GROQ_MODEL_FALLBACK,
         'temperature': GROQ_TEMPERATURE,
@@ -136,4 +128,12 @@ PROVIDER_SETTINGS = {
         'system_prompt': GROQ_SYSTEM_PROMPT
     }
 }
+
+# Add after API key definitions
+def validate_api_keys():
+    for provider, settings in PROVIDER_SETTINGS.items():
+        if provider in SUPPORTED_PROVIDERS and not settings['api_key']:
+            raise ValueError(f"API key for {provider} is required but not set")
+
+validate_api_keys()
 

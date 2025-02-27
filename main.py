@@ -6,15 +6,13 @@ from fastapi.staticfiles import StaticFiles
 import time
 import uvicorn
 from models import ChatRequest, HealthResponse
-from aiproviders import (
-    stream_response, PROVIDER_MODELS, health_check_provider
-)
+from aiproviders import stream_response, health_check_provider
 from logging_config import logger, debug_with_context
 import traceback
 import sentry_sdk
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from configuration import (
-    PORT, SUPPORTED_PROVIDERS,
+    PORT, SUPPORTED_PROVIDERS, PROVIDER_SETTINGS,
     SENTRY_DSN, SENTRY_TRACES_SAMPLE_RATE, SENTRY_PROFILES_SAMPLE_RATE,
     SENTRY_ENVIRONMENT, SENTRY_ENABLE_TRACING, SENTRY_SEND_DEFAULT_PII
 )
@@ -115,7 +113,6 @@ async def provider_health_check(provider: str):
     try:
         success, message, duration = await health_check_provider(provider)
         
-        # Fix the debug_with_context call
         debug_with_context(
             logger,
             f"Health check completed for {provider}",  # message as first arg
@@ -125,7 +122,7 @@ async def provider_health_check(provider: str):
         
         return {
             "provider": provider,
-            "status": "OK" if success else "ERROR",  # Changed from "healthy"/"unhealthy" to "OK"/"ERROR"
+            "status": "OK" if success else "ERROR",
             "message": message,
             "metrics": {
                 "responseTime": f"{duration:.3f}s"
@@ -137,7 +134,7 @@ async def provider_health_check(provider: str):
         logger.error(traceback.format_exc())
         return {
             "provider": provider,
-            "status": "ERROR",  # Changed from "error" to "ERROR"
+            "status": "ERROR",
             "error": {"message": str(e)},
             "metrics": {
                 "responseTime": "N/A"
