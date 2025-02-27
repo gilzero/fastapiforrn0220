@@ -8,6 +8,7 @@ A FastAPI-based server providing a unified interface to multiple AI chat provide
 - Server-Sent Events (SSE) streaming responses
 - Automatic model fallback mechanism
 - Comprehensive logging system
+- Error tracking and performance monitoring with Sentry
 - Health monitoring endpoints
 - Input validation
 - Environment-based configuration
@@ -65,6 +66,10 @@ OPENAI_API_KEY=your_key
 ANTHROPIC_API_KEY=your_key
 GEMINI_API_KEY=your_key
 
+# Sentry Configuration
+SENTRY_DSN=your_sentry_dsn
+SENTRY_ENVIRONMENT=development
+
 # Models
 OPENAI_MODEL_DEFAULT=gpt-4o
 ANTHROPIC_MODEL_DEFAULT=claude-3-5-sonnet-latest
@@ -99,6 +104,12 @@ curl -X POST "http://localhost:3050/chat/gpt" \
          }'
 ```
 
+### Sentry Debug
+```bash
+# Test Sentry error reporting
+GET /sentry-debug
+```
+
 See [API Documentation](docs/api_docs.md) for detailed specifications.
 
 ## Model Selection Architecture
@@ -117,6 +128,16 @@ Three-tier logging system:
 - debug.log: Debug level with context
 
 See [Logging Documentation](docs/logs_doc.md) for details.
+
+## Error Tracking and Performance Monitoring
+
+The application uses Sentry for error tracking, performance monitoring, and profiling:
+- Real-time error tracking with detailed context
+- Performance monitoring of API endpoints
+- Code profiling to identify bottlenecks
+- Environment-aware configuration
+
+See [Sentry Integration Documentation](docs/sentry_integration.md) for details.
 
 ## Development
 
@@ -155,6 +176,7 @@ coverage html
 - [Data Models](docs/data_models_docs.md)
 - [File Structure](docs/file_structure_docs.md)
 - [Logging System](docs/logs_doc.md)
+- [Sentry Integration](docs/sentry_integration.md)
 - [Integration Examples](docs/api_integration_examples.md)
 - [Test Documentation](docs/test_aiproviders_docs.md)
 

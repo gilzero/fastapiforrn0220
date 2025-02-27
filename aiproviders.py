@@ -9,6 +9,7 @@ from google.genai import types
 from fastapi import HTTPException
 from models import ChatRequest, ConversationMessage
 from logging_config import logger, debug_with_context, generate_conversation_id, log_conversation_entry
+import sentry_sdk
 from configuration import (
     # API Keys
     OPENAI_API_KEY,
@@ -40,7 +41,9 @@ from configuration import (
     GEMINI_SYSTEM_PROMPT,
     # Providers
     SUPPORTED_PROVIDERS,
-    RESPONSE_TIMEOUT
+    RESPONSE_TIMEOUT,
+    # Sentry
+    SENTRY_DSN
 )
 from groq import AsyncGroq
 
@@ -122,6 +125,14 @@ async def _stream_response_gpt(messages: List[dict], model: str, message_id: str
         yield "data: [DONE]\n\n"
     except Exception as e:
         logger.error(f"Error in GPT stream: {str(e)}", exc_info=True)
+        if SENTRY_DSN:
+            sentry_sdk.set_context("provider_details", {
+                "provider": "gpt",
+                "model": model,
+                "temperature": float(OPENAI_TEMPERATURE or 0.7),
+                "max_tokens": int(OPENAI_MAX_TOKENS or 2000)
+            })
+            sentry_sdk.capture_exception(e)
         raise
 
 async def _stream_response_claude(messages: List[dict], model: str, message_id: str):
@@ -204,6 +215,12 @@ async def _stream_response_groq(messages: List[dict], model: str, message_id: st
 
 async def stream_response(request: ChatRequest, provider: str):
     conversation_id = generate_conversation_id()
+    
+    # Set up Sentry transaction for this request if Sentry is enabled
+    if SENTRY_DSN:
+        sentry_sdk.set_tag("provider", provider)
+        sentry_sdk.set_tag("conversation_id", conversation_id)
+    
     response_buffer = []
     """Stream chat responses from an AI provider"""
     logger.debug("Starting stream_response", 
@@ -269,6 +286,13 @@ async def stream_response(request: ChatRequest, provider: str):
 
             except Exception as e:
                 logger.error(f"Error with {provider} using model {model}: {str(e)}", exc_info=True)
+                if SENTRY_DSN:
+                    sentry_sdk.set_context("stream_details", {
+                        "provider": provider,
+                        "model": model,
+                        "message_count": len(request.messages)
+                    })
+                    sentry_sdk.capture_exception(e)
                 return
 
         try:
@@ -316,13 +340,27 @@ async def stream_response(request: ChatRequest, provider: str):
 
             # If both models fail
             if not stream_completed:
+                error_message = f"Both default and fallback models failed for provider {provider}"
+                if SENTRY_DSN:
+                    sentry_sdk.set_context("model_failure", {
+                        "provider": provider,
+                        "default_model": default_model,
+                        "fallback_model": fallback_model
+                    })
+                    sentry_sdk.capture_message(error_message, level="error")
                 raise HTTPException(
                     status_code=500,
-                    detail=f"Both default and fallback models failed for provider {provider}"
+                    detail=error_message
                 )
 
         except Exception as e:
             logger.error(f"Stream response error: {str(e)}", exc_info=True)
+            if SENTRY_DSN:
+                sentry_sdk.set_context("stream_response_error", {
+                    "provider": provider,
+                    "error_type": type(e).__name__
+                })
+                sentry_sdk.capture_exception(e)
             raise HTTPException(status_code=500, detail=str(e))
 
     except Exception as e:
@@ -335,6 +373,13 @@ async def stream_response(request: ChatRequest, provider: str):
                 }
             }
         )
+        if SENTRY_DSN:
+            sentry_sdk.set_context("stream_response_error", {
+                "provider": provider,
+                "error_type": type(e).__name__,
+                "original_error": str(e)
+            })
+            sentry_sdk.capture_exception(e)
         raise  # Let FastAPI handle the error type conversion
 
 

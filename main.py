@@ -10,7 +10,32 @@ from aiproviders import (
 )
 from logging_config import logger, debug_with_context
 import traceback
-from configuration import PORT, SUPPORTED_PROVIDERS  # Import from configuration
+import sentry_sdk
+from sentry_sdk.integrations.fastapi import FastApiIntegration
+from configuration import (
+    PORT, SUPPORTED_PROVIDERS,
+    SENTRY_DSN, SENTRY_TRACES_SAMPLE_RATE, SENTRY_PROFILES_SAMPLE_RATE,
+    SENTRY_ENVIRONMENT, SENTRY_ENABLE_TRACING, SENTRY_SEND_DEFAULT_PII
+)
+
+# Initialize Sentry
+if SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        environment=SENTRY_ENVIRONMENT,
+        send_default_pii=SENTRY_SEND_DEFAULT_PII,
+        traces_sample_rate=SENTRY_TRACES_SAMPLE_RATE if SENTRY_ENABLE_TRACING else 0.0,
+        profiles_sample_rate=SENTRY_PROFILES_SAMPLE_RATE if SENTRY_ENABLE_TRACING else 0.0,
+        integrations=[
+            FastApiIntegration(),
+        ],
+        _experiments={
+            "continuous_profiling_auto_start": True,
+        },
+    )
+    logger.info(f"Sentry initialized with environment: {SENTRY_ENVIRONMENT}")
+else:
+    logger.warning("Sentry DSN not provided. Sentry integration disabled.")
 
 # Initialize FastAPI
 app = FastAPI()
@@ -94,6 +119,14 @@ async def provider_health_check(provider: str):
             }
         }
 
+# Sentry test endpoint
+@app.get("/sentry-debug")
+async def trigger_error():
+    """Endpoint to test Sentry integration by triggering a division by zero error."""
+    logger.info("Sentry debug endpoint called")
+    division_by_zero = 1 / 0
+    return {"message": "This will never be returned"}
+
 # Chat endpoint
 @app.post("/chat/{provider}")
 async def chat(provider: str, request: ChatRequest):
@@ -150,6 +183,14 @@ async def chat(provider: str, request: ChatRequest):
 
     except Exception as e:
         logger.error(f"Chat endpoint error: {str(e)}", exc_info=True)
+        # Capture exception in Sentry with additional context
+        if SENTRY_DSN:
+            sentry_sdk.set_context("request", {
+                "provider": provider,
+                "message_count": len(request.messages),
+                "first_message_role": request.messages[0].role if request.messages else None
+            })
+            sentry_sdk.capture_exception(e)
         raise HTTPException(status_code=500, detail=f"Chat error with {provider}: {str(e)}")
 
 if __name__ == "__main__":
