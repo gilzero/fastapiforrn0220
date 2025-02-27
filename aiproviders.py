@@ -4,7 +4,7 @@ import json
 import time
 from fastapi import HTTPException
 from models import ChatRequest, ConversationMessage
-from logging_config import logger, debug_with_context, generate_conversation_id, log_conversation_entry
+from logging_config import logger, debug_with_context, generate_conversation_id, log_conversation_entry, get_request_id
 import sentry_sdk
 from configuration import (
     # Single source of truth for provider configuration
@@ -25,22 +25,23 @@ async def stream_response(request: ChatRequest, provider: str) -> AsyncGenerator
         raise HTTPException(status_code=400, detail=f"Provider {provider} not supported")
     
     conversation_id = generate_conversation_id()
+    request_id = get_request_id()
     
     # Set up Sentry transaction for this request if Sentry is enabled
     if SENTRY_DSN:
         sentry_sdk.set_tag("provider", provider)
         sentry_sdk.set_tag("conversation_id", conversation_id)
+        sentry_sdk.set_tag("request_id", request_id)
     
     response_buffer = []
     
-    logger.debug("Starting stream_response", 
-        extra={
-            "context": {
-                "provider": provider,
-                "message_count": len(request.messages),
-                "validation_state": "pre-validation"
-            }
-        }
+    debug_with_context(logger,
+        "Starting stream_response", 
+        provider=provider,
+        message_count=len(request.messages),
+        validation_state="pre-validation",
+        conversation_id=conversation_id,
+        request_id=request_id
     )
 
     try:
@@ -67,7 +68,9 @@ async def stream_response(request: ChatRequest, provider: str) -> AsyncGenerator
                 debug_with_context(logger,
                     f"Stream completed for {provider}",
                     duration=f"{stream_duration:.3f}s",
-                    chunks_sent=chunks_sent
+                    chunks_sent=chunks_sent,
+                    conversation_id=conversation_id,
+                    request_id=request_id
                 )
                 # Log the complete conversation
                 complete_response = ''.join(response_buffer)
@@ -80,7 +83,9 @@ async def stream_response(request: ChatRequest, provider: str) -> AsyncGenerator
                 "context": {
                     "error_type": type(e).__name__,
                     "original_error": str(e),
-                    "provider": provider
+                    "provider": provider,
+                    "conversation_id": conversation_id,
+                    "request_id": request_id
                 }
             }
         )
@@ -88,13 +93,17 @@ async def stream_response(request: ChatRequest, provider: str) -> AsyncGenerator
             sentry_sdk.set_context("stream_response_error", {
                 "provider": provider,
                 "error_type": type(e).__name__,
-                "original_error": str(e)
+                "original_error": str(e),
+                "conversation_id": conversation_id,
+                "request_id": request_id
             })
             sentry_sdk.capture_exception(e)
         raise  # Let FastAPI handle the error type conversion
 
 async def health_check_provider(provider: str) -> Tuple[bool, str, float]:
     """Check if a provider is responding correctly."""
+    request_id = get_request_id()
+    
     if provider not in SUPPORTED_PROVIDERS:
         return False, f"Invalid provider. Supported: {', '.join(SUPPORTED_PROVIDERS)}", 0
 
@@ -106,12 +115,38 @@ async def health_check_provider(provider: str) -> Tuple[bool, str, float]:
         provider_instance = ProviderFactory.get_provider(provider)
         model = PROVIDER_SETTINGS[provider]['default_model']
         
+        debug_with_context(logger,
+            f"Health check started for {provider}",
+            provider=provider,
+            model=model,
+            request_id=request_id
+        )
+        
         content = await provider_instance.health_check(model, test_message)
         
         duration = time.time() - start_time
+        
+        debug_with_context(logger,
+            f"Health check completed for {provider}",
+            provider=provider,
+            model=model,
+            duration=f"{duration:.3f}s",
+            success=True,
+            request_id=request_id
+        )
+        
         # For testing purposes, always return True
         return True, "Model responding correctly", duration
 
     except Exception as e:
         duration = time.time() - start_time
+        
+        debug_with_context(logger,
+            f"Health check failed for {provider}",
+            provider=provider,
+            error=str(e),
+            duration=f"{duration:.3f}s",
+            request_id=request_id
+        )
+        
         return False, str(e), duration

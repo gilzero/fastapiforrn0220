@@ -8,15 +8,41 @@ from datetime import datetime, timezone
 from typing import Optional, Dict, List, Tuple, Any
 from uuid import uuid4
 from configuration import LOG_SETTINGS
+import contextvars
+
+# Create a context variable to store the request ID
+request_id_var = contextvars.ContextVar('request_id', default=None)
+
+def get_request_id() -> Optional[str]:
+    """Get the current request ID from context or generate a new one if not present."""
+    request_id = request_id_var.get()
+    if request_id is None:
+        request_id = str(uuid4())
+        set_request_id(request_id)
+    return request_id
+
+def set_request_id(request_id: str) -> None:
+    """Set the request ID in the current context."""
+    request_id_var.set(request_id)
 
 class CustomFormatter(logging.Formatter):
-    """Custom formatter that includes timezone-aware UTC timestamp and formats debug context."""
+    """Custom formatter that includes timezone-aware UTC timestamp, request ID, and formats debug context."""
 
     def format(self, record: logging.LogRecord) -> str:
-        """Format the log record with UTC timestamp and optional context."""
+        """Format the log record with UTC timestamp, request ID, and optional context."""
         record.timestamp = datetime.now(timezone.utc).isoformat()
+        
+        # Add request ID to the record if not already present
+        if not hasattr(record, 'request_id'):
+            record.request_id = get_request_id()
+            
+        # Format the message with context for debug logs
         if record.levelno == logging.DEBUG and hasattr(record, 'extra_context'):
             try:
+                # Add request_id to context if not already there
+                if 'request_id' not in record.extra_context:
+                    record.extra_context['request_id'] = record.request_id
+                    
                 context = json.dumps(record.extra_context, indent=2, ensure_ascii=False)
                 record.msg = f"{record.msg}\nContext: {context}"
             except (TypeError, ValueError) as e:
@@ -49,7 +75,7 @@ def setup_logging(
     logger_name: Optional[str] = None,
     max_bytes: int = LOG_SETTINGS['MAX_BYTES'],
     backup_count: int = LOG_SETTINGS['BACKUP_COUNT'],
-    log_format: str = LOG_SETTINGS['FORMAT'],
+    log_format: str = '%(timestamp)s - [%(request_id)s] - %(name)s - %(levelname)s - %(message)s',
     clear_handlers: bool = True
 ) -> logging.Logger:
     """Set up logging configuration with file and console handlers."""
@@ -89,8 +115,12 @@ def setup_logging(
     return logger
 
 def debug_with_context(logger: logging.Logger, message: str, **context: Any) -> None:
-    """Log a debug message with additional context."""
-    extra = {'extra_context': context}
+    """Log a debug message with additional context including request ID."""
+    # Add request ID to context if not explicitly provided
+    if 'request_id' not in context:
+        context['request_id'] = get_request_id()
+        
+    extra = {'extra_context': context, 'request_id': context['request_id']}
     logger.debug(message, extra=extra)
 
 # Configure conversation logger if enabled
@@ -155,6 +185,7 @@ def log_conversation_entry(conversation_id: str, user_prompt: str, ai_response: 
         entry = {
             'timestamp': datetime.now(timezone.utc).isoformat(),
             'conversation_id': conversation_id,
+            'request_id': get_request_id(),
             'user_prompt': user_prompt,
             'ai_response': clean_response
         }
@@ -162,7 +193,7 @@ def log_conversation_entry(conversation_id: str, user_prompt: str, ai_response: 
     except Exception as e:
         # Log any errors to the main application log
         logging.getLogger().error(f"Failed to log conversation entry: {str(e)}", 
-                                extra={'conversation_id': conversation_id})
+                                extra={'conversation_id': conversation_id, 'request_id': get_request_id()})
 
 # initialize the root logger.  Individual modules should get their own loggers.
 logger = setup_logging()

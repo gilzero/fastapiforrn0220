@@ -1,13 +1,13 @@
 # filepath: main.py
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse
+from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 import time
 import uvicorn
 from models import ChatRequest, HealthResponse
 from aiproviders import stream_response, health_check_provider
-from logging_config import logger, debug_with_context
+from logging_config import logger, debug_with_context, get_request_id, set_request_id
 import traceback
 import sentry_sdk
 from sentry_sdk.integrations.fastapi import FastApiIntegration
@@ -17,6 +17,54 @@ from configuration import (
     SENTRY_ENVIRONMENT, SENTRY_ENABLE_TRACING, SENTRY_SEND_DEFAULT_PII
 )
 import os
+import uuid
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp
+from datetime import datetime, timezone
+
+# Request ID middleware
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    """Middleware to assign and track request IDs throughout the request lifecycle."""
+    
+    async def dispatch(self, request: Request, call_next):
+        # Generate or extract request ID
+        request_id = request.headers.get("X-Request-ID")
+        if not request_id:
+            request_id = str(uuid.uuid4())
+        
+        # Store in context for this request
+        set_request_id(request_id)
+        
+        # Add request ID to Sentry scope if enabled
+        if SENTRY_DSN:
+            sentry_sdk.set_tag("request_id", request_id)
+        
+        # Log the incoming request with request ID
+        debug_with_context(logger,
+            f"Request started: {request.method} {request.url.path}",
+            request_id=request_id,
+            client_host=request.client.host if request.client else "unknown",
+            path=request.url.path,
+            method=request.method
+        )
+        
+        # Process the request
+        start_time = time.time()
+        response = await call_next(request)
+        duration = time.time() - start_time
+        
+        # Add request ID to response headers
+        response.headers["X-Request-ID"] = request_id
+        
+        # Log the completed request
+        debug_with_context(logger,
+            f"Request completed: {request.method} {request.url.path}",
+            request_id=request_id,
+            duration=f"{duration:.3f}s",
+            status_code=response.status_code
+        )
+        
+        return response
 
 # Initialize Sentry
 if SENTRY_DSN:
@@ -60,6 +108,53 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Add request ID middleware
+app.add_middleware(RequestIDMiddleware)
+
+# Exception handler to include request ID in error responses
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Add request ID to HTTP exception responses"""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "status": "error",
+            "code": exc.status_code,
+            "message": exc.detail,
+            "request_id": get_request_id(),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    )
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """Add request ID to general exception responses"""
+    # Log the exception with request ID
+    logger.error(
+        f"Unhandled exception: {str(exc)}",
+        extra={
+            "request_id": get_request_id(),
+            "path": request.url.path,
+            "method": request.method
+        },
+        exc_info=True
+    )
+    
+    # Capture in Sentry if enabled
+    if SENTRY_DSN:
+        sentry_sdk.capture_exception(exc)
+    
+    return JSONResponse(
+        status_code=500,
+        content={
+            "status": "error",
+            "code": 500,
+            "message": "Internal server error",
+            "request_id": get_request_id(),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    )
+
 # Root route to serve custom HTML with favicon
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
@@ -71,21 +166,6 @@ async def read_root():
 async def get_favicon():
     """Serve the favicon directly"""
     return FileResponse("static/favicon.ico")
-
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    """Log request timing and details"""
-    start_time = time.time()
-    response = await call_next(request)
-    duration = time.time() - start_time
-    
-    debug_with_context(logger,
-        f"Request completed: {request.method} {request.url.path}",
-        duration=f"{duration:.3f}s",
-        status_code=response.status_code,
-        client_host=request.client.host
-    )
-    return response
 
 # Health check endpoints
 @app.get("/health", response_model=HealthResponse)
@@ -153,14 +233,12 @@ async def trigger_error():
 @app.post("/chat/{provider}")
 async def chat(provider: str, request: ChatRequest):
     """Stream chat responses from an AI provider"""
-    logger.debug("Chat endpoint called",
-        extra={
-            "context": {
-                "provider": provider,
-                "message_count": len(request.messages),
-                "validation_state": "post-fastapi-validation"
-            }
-        }
+    debug_with_context(logger,
+        "Chat endpoint called",
+        provider=provider,
+        message_count=len(request.messages),
+        validation_state="post-fastapi-validation",
+        request_id=get_request_id()
     )
     start_time = time.time()
 
