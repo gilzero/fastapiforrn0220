@@ -1,7 +1,8 @@
 # filepath: main.py
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 import time
 import uvicorn
 from models import ChatRequest, HealthResponse
@@ -17,6 +18,7 @@ from configuration import (
     SENTRY_DSN, SENTRY_TRACES_SAMPLE_RATE, SENTRY_PROFILES_SAMPLE_RATE,
     SENTRY_ENVIRONMENT, SENTRY_ENABLE_TRACING, SENTRY_SEND_DEFAULT_PII
 )
+import os
 
 # Initialize Sentry
 if SENTRY_DSN:
@@ -38,7 +40,18 @@ else:
     logger.warning("Sentry DSN not provided. Sentry integration disabled.")
 
 # Initialize FastAPI
-app = FastAPI()
+app = FastAPI(
+    title="AI Chat API Server",
+    description="A FastAPI-based server providing a unified interface to multiple AI chat providers",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
+    swagger_ui_parameters={"favicon": "/static/favicon.png"},
+)
+
+# Mount static files directory
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Add CORS middleware
 app.add_middleware(
@@ -48,6 +61,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Root route to serve custom HTML with favicon
+@app.get("/", response_class=HTMLResponse)
+async def read_root():
+    """Serve the custom HTML page with favicon"""
+    return FileResponse("static/custom_docs.html")
+
+# Favicon route for browsers that look for favicon.ico in the root
+@app.get("/favicon.ico", include_in_schema=False)
+async def get_favicon():
+    """Serve the favicon directly"""
+    return FileResponse("static/favicon.ico")
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
